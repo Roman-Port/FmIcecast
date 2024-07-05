@@ -22,6 +22,7 @@ static int in_buffer_use = 0;
 // FIFO buffer - This holds data from the radio thread for the network thread to pick up
 // To access any of these, make sure we are locked in a mutex
 static pthread_mutex_t cast_lock;
+static pthread_cond_t cast_cond;
 static cast_buffer_t cast_buffers[CAST_FIFOS_COUNT];
 static int cast_buffers_read = 0;
 static int cast_buffers_write = 0;
@@ -41,12 +42,18 @@ static FLAC__StreamEncoderWriteStatus flac_write_cb(const FLAC__StreamEncoder* e
 }
 
 int cast_init(const char* host, unsigned short port, const char* mount, const char* username, const char* password) {
-    //Initialize
+    //Initialize shoutcast
     shout_init();
 
     //Init mutex
     if (pthread_mutex_init(&cast_lock, NULL) != 0) {
         printf("Failed to initialize mutex.\n");
+        return -1;
+    }
+
+    //Init condition
+    if (pthread_cond_init(&cast_cond, NULL) != 0) {
+        printf("Failed to initialize cond.\n");
         return -1;
     }
 
@@ -124,20 +131,6 @@ int cast_init(const char* host, unsigned short port, const char* mount, const ch
         return -1;
     }
 
-    //Test
-    cast_buffers_consumed = 1;
-    cast_buffers_write = 1;
-    cast_transmit();
-
-    /*int32_t temp[CAST_BUFFER_SIZE];
-    for (int i = 0; i < CAST_BUFFER_SIZE; i++)
-        temp[i] = i;
-    for (int i = 0; i < 50; i++) {
-        if (!FLAC__stream_encoder_process_interleaved(flac, temp, CAST_BUFFER_SIZE)) {
-            printf("Failed to encode FLAC data.\n");
-            return -1;
-        }
-    }*/
     return 0;
 }
 
@@ -145,27 +138,25 @@ int cast_transmit() {
     //Lock
     pthread_mutex_lock(&cast_lock);
 
-    //Check if any buffers are available, and if so copy it out while we're locking the mutex to minimize the time we're locking it
+    //Wait for buffers to become available
     int32_t working_buffer[CAST_BUFFER_SIZE];
-    int available = cast_buffers_consumed;
-    if (available > 0) {
-        //Pop a buffer off and copy it in
-        memcpy(working_buffer, cast_buffers[cast_buffers_read].buffer, sizeof(working_buffer));
+    if (cast_buffers_consumed == 0)
+        pthread_cond_wait(&cast_cond, &cast_lock);
+    
+    //Pop a buffer off and copy it in
+    memcpy(working_buffer, cast_buffers[cast_buffers_read].buffer, sizeof(working_buffer));
 
-        //Update FIFO state
-        cast_buffers_read = (cast_buffers_read + 1) % CAST_FIFOS_COUNT;
-        cast_buffers_consumed--;
-    }
+    //Update FIFO state
+    cast_buffers_read = (cast_buffers_read + 1) % CAST_FIFOS_COUNT;
+    cast_buffers_consumed--;
 
     //Unlock
     pthread_mutex_unlock(&cast_lock);
 
     //Send on wire
-    if (available > 0) {
-        if (!FLAC__stream_encoder_process_interleaved(flac, working_buffer, CAST_BUFFER_SIZE)) {
-            printf("Failed to encode FLAC data: %s\n", FLAC__StreamEncoderStateString[FLAC__stream_encoder_get_state(flac)]);
-            return -1;
-        }
+    if (!FLAC__stream_encoder_process_interleaved(flac, working_buffer, CAST_BUFFER_SIZE)) {
+        printf("Failed to encode FLAC data: %s\n", FLAC__StreamEncoderStateString[FLAC__stream_encoder_get_state(flac)]);
+        return -1;
     }
 
     return 0;
@@ -198,6 +189,9 @@ void cast_push_sample(float sample) {
             //Update FIFO state
             cast_buffers_write = (cast_buffers_write + 1) % CAST_FIFOS_COUNT;
             cast_buffers_consumed++;
+
+            //Signal a buffer is ready
+            pthread_cond_signal(&cast_cond);
 
             //TEST
             printf("DEBUG: read=%i; write=%i; use=%i; free=%i; dropped=%i\n", cast_buffers_read, cast_buffers_write, cast_buffers_consumed, CAST_FIFOS_COUNT - cast_buffers_consumed, cast_buffers_dropped);
