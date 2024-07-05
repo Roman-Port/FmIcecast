@@ -2,9 +2,9 @@
 #include "libairspyhf/airspyhf.h"
 #include "stdio.h"
 #include "stdint.h"
+#include "string.h"
 
 #define FREQ 103300000
-#define FIFO_SIZE 16384
 #define FM_DEVIATION 85000
 
 #define FM_GAIN (SAMP_RATE / (2 * M_PI * FM_DEVIATION))
@@ -18,8 +18,6 @@ static int iq_buffer_index = 0;
 static float* mpx_buffer;
 static int mpx_buffer_index = 0;
 static int mpx_buffer_decimation = 0;
-
-static fifo_buffer_t iq_fifo;
 
 static lv_32fc_t fm_last_sample = 0;
 
@@ -112,18 +110,18 @@ int radio_init() {
 
 	//Allocate buffers
 	size_t alignment = volk_get_alignment();
-	iq_buffer = (lv_32fc_t*)volk_malloc(NTAPS_DEMOD * 2 * sizeof(lv_32fc_t), alignment);
-	mpx_buffer = (float*)volk_malloc(NTAPS_COMPOSITE * 2 * sizeof(float), alignment);
+	size_t iq_buffer_len = NTAPS_DEMOD * 2 * sizeof(lv_32fc_t);
+	iq_buffer = (lv_32fc_t*)volk_malloc(iq_buffer_len, alignment);
+	size_t mpx_buffer_len = NTAPS_COMPOSITE * 2 * sizeof(float);
+	mpx_buffer = (float*)volk_malloc(mpx_buffer_len, alignment);
 	if (iq_buffer == 0 || mpx_buffer == 0) {
 		printf("Failed to allocate buffers.\n");
 		return -1;
 	}
 
-	//Initialize FIFOs
-	if (fifo_init(&iq_fifo, FIFO_SIZE*2)) {
-		printf("Failed to allocate FIFOs.\n");
-		return -1;
-	}
+	//Clear out buffers
+	memset(iq_buffer, 0, iq_buffer_len);
+	memset(mpx_buffer, 0, mpx_buffer_len);
 
 	//Open
 	printf("Opening AirSpy HF device...\n");
