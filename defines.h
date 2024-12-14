@@ -15,40 +15,7 @@ extern const float taps_composite[NTAPS_COMPOSITE];
 
 float fast_atan2f(float y, float x);
 
-/// <summary>
-/// Initializes and connects to Icecast. Returns 0 on success.
-/// </summary>
-/// <param name="host"></param>
-/// <param name="port"></param>
-/// <param name="mount"></param>
-/// <param name="username"></param>
-/// <param name="password"></param>
-/// <returns></returns>
-int cast_init(const char* host, unsigned short port, const char* mount, const char* username, const char* password);
 
-/// <summary>
-/// Pushes a sample to the buffer.
-/// </summary>
-/// <param name="sample"></param>
-void cast_push_sample(float sample);
-
-/// <summary>
-/// Call continously to transmit buffers to the internet.
-/// </summary>
-/// <returns></returns>
-int cast_transmit();
-
-/// <summary>
-/// Initializes the radio. Returns 0 on success.
-/// </summary>
-/// <returns></returns>
-int radio_init();
-
-/// <summary>
-/// Starts the radio streaming samples. Returns 0 on success.
-/// </summary>
-/// <returns></returns>
-int radio_start();
 
 typedef struct {
 	size_t size; // Number of samples
