@@ -10,8 +10,17 @@
 class fmice_icecast {
 
 public:
-	fmice_icecast(const char* host, unsigned short port, const char* mount, const char* username, const char* password, int channels, int sampRate);
+	fmice_icecast(int channels, int sampRate);
 	~fmice_icecast();
+
+	void set_host(const char* hostname);
+	void set_port(unsigned int port);
+	void set_mount(const char* mount);
+	void set_username(const char* username);
+	void set_password(const char* password);
+
+	bool is_configured();
+	void init();
 
 	void push(float* samples, int count);
 
@@ -23,6 +32,13 @@ private:
 	size_t samples_dropped;
 	pthread_t worker_thread;
 	int channels;
+	int sample_rate;
+
+	char icecast_host[256];
+	unsigned short icecast_port;
+	char icecast_mount[256];
+	char icecast_username[256];
+	char icecast_password[256];
 
 	// In buffer - This is what cast_push_sample accesses and should only be used by its thread
 	int32_t in_buffer[CAST_BUFFER_SIZE];

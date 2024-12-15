@@ -23,7 +23,7 @@ pkg_check_modules(flac REQUIRED IMPORTED_TARGET flac)
 add_subdirectory(dsp)
 
 # Add main
-add_executable (fmice "main.cpp" "radio.cpp" "fifo.cpp" "taps.cpp" "fast_atan2.cpp" "cast.cpp" "circular_buffer.cpp")
+add_executable (fmice "main.cpp" "radio.cpp"    "cast.cpp" "circular_buffer.cpp")
 
 # Link
 target_link_libraries(fmice Volk::volk airspyhf shout FLAC Threads::Threads sdrpp_dsp)

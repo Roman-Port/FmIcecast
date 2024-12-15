@@ -11,10 +11,26 @@
 #include <dsp/loop/pll.h>
 #include <dsp/math/delay.h>
 
+typedef struct fmice_radio_settings_t {
+
+	double fm_deviation;
+	double deemphasis_rate;
+
+	double bb_filter_cutoff;
+	double bb_filter_trans;
+
+	double mpx_filter_cutoff;
+	double mpx_filter_trans;
+
+	double aud_filter_cutoff;
+	double aud_filter_trans;
+
+};
+
 class fmice_radio {
 
 public:
-	fmice_radio();
+	fmice_radio(fmice_radio_settings_t settings);
 	~fmice_radio();
 
 	/// <summary>

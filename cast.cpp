@@ -11,7 +11,7 @@
 
 static int is_icecast_initialized = 0;
 
-fmice_icecast::fmice_icecast(const char* host, unsigned short port, const char* mount, const char* username, const char* password, int channels, int sampRate) {
+fmice_icecast::fmice_icecast(int channels, int sampRate) {
     //Init buffer
     circ_buffer = new fmice_circular_buffer<int32_t>(CAST_BUFFER_SIZE * CAST_FIFOS_COUNT);
 
@@ -19,11 +19,59 @@ fmice_icecast::fmice_icecast(const char* host, unsigned short port, const char* 
     samples_dropped = 0;
     samples_sent = 0;
     this->channels = channels;
+    this->sample_rate = sampRate;
+    memset(icecast_host, 0, sizeof(icecast_host));
+    icecast_port = 0;
+    memset(icecast_mount, 0, sizeof(icecast_mount));
+    memset(icecast_username, 0, sizeof(icecast_username));
+    memset(icecast_password, 0, sizeof(icecast_password));
 
     //Init global icecast if it's not
     if (!is_icecast_initialized)
         shout_init();
     is_icecast_initialized = 1;
+}
+
+fmice_icecast::~fmice_icecast() {
+
+}
+
+void fmice_icecast::set_host(const char* hostname) {
+    strncpy(icecast_host, hostname, sizeof(icecast_host) - 1);
+    icecast_host[sizeof(icecast_host) - 1] = 0;
+}
+
+void fmice_icecast::set_port(unsigned int port) {
+    icecast_port = port;
+}
+
+void fmice_icecast::set_mount(const char* mount) {
+    strncpy(icecast_mount, mount, sizeof(icecast_mount) - 1);
+    icecast_mount[sizeof(icecast_mount) - 1] = 0;
+}
+
+void fmice_icecast::set_username(const char* username) {
+    strncpy(icecast_username, username, sizeof(icecast_username) - 1);
+    icecast_username[sizeof(icecast_username) - 1] = 0;
+}
+
+void fmice_icecast::set_password(const char* password) {
+    strncpy(icecast_password, password, sizeof(icecast_password) - 1);
+    icecast_password[sizeof(icecast_password) - 1] = 0;
+}
+
+bool fmice_icecast::is_configured() {
+    return strlen(icecast_host) > 0 &&
+        icecast_port > 0 &&
+        strlen(icecast_mount) > 0 &&
+        strlen(icecast_username) > 0 &&
+        strlen(icecast_password);
+}
+
+void fmice_icecast::init() {
+    //Make sure we're ready
+    if (!is_configured())
+        throw new std::runtime_error("Icecast is not configured.");
 
     //Allocate shoutcast
     shout = shout_new();
@@ -31,28 +79,24 @@ fmice_icecast::fmice_icecast(const char* host, unsigned short port, const char* 
         throw new std::runtime_error("Failed to allocate shout_t.\n");
 
     //Set up paramters
-    if (shout_set_host(shout, host) != SHOUTERR_SUCCESS)
+    if (shout_set_host(shout, icecast_host) != SHOUTERR_SUCCESS)
         throw new std::runtime_error("Error setting hostname.");
     if (shout_set_protocol(shout, SHOUT_PROTOCOL_HTTP) != SHOUTERR_SUCCESS)
         throw new std::runtime_error("Error setting protocol.");
-    if (shout_set_port(shout, port) != SHOUTERR_SUCCESS)
+    if (shout_set_port(shout, icecast_port) != SHOUTERR_SUCCESS)
         throw new std::runtime_error("Error setting port.");
-    if (shout_set_password(shout, password) != SHOUTERR_SUCCESS)
+    if (shout_set_password(shout, icecast_password) != SHOUTERR_SUCCESS)
         throw new std::runtime_error("Error setting password.");
-    if (shout_set_mount(shout, mount) != SHOUTERR_SUCCESS)
+    if (shout_set_mount(shout, icecast_mount) != SHOUTERR_SUCCESS)
         throw new std::runtime_error("Error setting mount.");
-    if (shout_set_user(shout, username) != SHOUTERR_SUCCESS)
+    if (shout_set_user(shout, icecast_username) != SHOUTERR_SUCCESS)
         throw new std::runtime_error("Error setting user.");
     if (shout_set_content_format(shout, SHOUT_FORMAT_OGG, SHOUT_USAGE_UNKNOWN, NULL) != SHOUTERR_SUCCESS)
         throw new std::runtime_error("Error setting format.");
 
     //Connect
-    printf("Connecting to the server...");
     if (shout_open(shout) != SHOUTERR_SUCCESS) {
         throw new std::runtime_error("Failed to connect to server.");
-    }
-    else {
-        printf("Connected!\n");
     }
 
     //Now, allocate FLAC
@@ -65,7 +109,7 @@ fmice_icecast::fmice_icecast(const char* host, unsigned short port, const char* 
     FLAC__stream_encoder_set_compression_level(flac, 5);
     FLAC__stream_encoder_set_channels(flac, channels);
     FLAC__stream_encoder_set_bits_per_sample(flac, 16);
-    FLAC__stream_encoder_set_sample_rate(flac, sampRate);
+    FLAC__stream_encoder_set_sample_rate(flac, sample_rate);
     FLAC__stream_encoder_set_total_samples_estimate(flac, 0);
 
     //Init encoder
@@ -74,10 +118,6 @@ fmice_icecast::fmice_icecast(const char* host, unsigned short port, const char* 
 
     //Start worker thread
     pthread_create(&worker_thread, NULL, work_static, this);
-}
-
-fmice_icecast::~fmice_icecast() {
-
 }
 
 FLAC__StreamEncoderWriteStatus fmice_icecast::flac_push_cb(const FLAC__StreamEncoder* encoder, const FLAC__byte buffer[], size_t bytes, uint32_t samples, uint32_t current_frame) {

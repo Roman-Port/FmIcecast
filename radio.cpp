@@ -18,7 +18,7 @@
 
 #define RADIO_BUFFER_SIZE 65536
 
-fmice_radio::fmice_radio() {
+fmice_radio::fmice_radio(fmice_radio_settings_t settings) {
 	//Zero out everything
 	radio = 0;
 	radio_transfer_size = 0;
@@ -41,17 +41,17 @@ fmice_radio::fmice_radio() {
 	radio_buffer = new fmice_circular_buffer<airspyhf_complex_float_t>(RADIO_BUFFER_SIZE * 16);
 
 	//Create baseband filter
-	filter_bb_taps = dsp::taps::lowPass(125000, 15000, SAMP_RATE);
+	filter_bb_taps = dsp::taps::lowPass(settings.bb_filter_cutoff, settings.bb_filter_trans, SAMP_RATE);
 	printf("Baseband filter taps: %i\n", filter_bb_taps.size);
 	filter_bb.init(NULL, filter_bb_taps);
 	filter_bb.out.setBufferSize(RADIO_BUFFER_SIZE);
 
 	//Configure FM demod
-	fm_demod.init(NULL, FM_DEVIATION, SAMP_RATE);
+	fm_demod.init(NULL, settings.fm_deviation, SAMP_RATE);
 	fm_demod.out.setBufferSize(RADIO_BUFFER_SIZE);
 
 	//Create composite filter
-	filter_mpx_taps = dsp::taps::lowPass(61000, 1500, SAMP_RATE);
+	filter_mpx_taps = dsp::taps::lowPass(settings.mpx_filter_cutoff, settings.mpx_filter_trans, SAMP_RATE);
 	printf("MPX filter taps: %i\n", filter_mpx_taps.size);
 	filter_mpx.init(NULL, filter_mpx_taps, DECIM_RATE);
 	filter_mpx.out.setBufferSize(RADIO_BUFFER_SIZE);
@@ -82,7 +82,10 @@ fmice_radio::fmice_radio() {
 	filter_audio_r.out.setBufferSize(RADIO_BUFFER_SIZE);
 
 	//Calculate deemphesis alpha
-	deemphasis_alpha = 1.0f - exp(-1.0f / (AUDIO_SAMP_RATE * (75 * 1e-6f)));
+	if (settings.deemphasis_rate != 0)
+		deemphasis_alpha = 1.0f - exp(-1.0f / (AUDIO_SAMP_RATE * (settings.deemphasis_rate * 1e-6f)));
+	else
+		deemphasis_alpha = 0;
 }
 
 fmice_radio::~fmice_radio() {
@@ -210,9 +213,11 @@ void fmice_radio::work() {
 		count = filter_audio_r.process(count, r, filter_audio_r.out.writeBuf);
 		assert(countL == count);
 
-		//Process deemphesis
-		process_deemphasis(deemphasis_alpha, &deemphasis_state_l, filter_audio_l.out.writeBuf, count);
-		process_deemphasis(deemphasis_alpha, &deemphasis_state_r, filter_audio_r.out.writeBuf, count);
+		//Apply deemphesis
+		if (deemphasis_alpha != 0) {
+			process_deemphasis(deemphasis_alpha, &deemphasis_state_l, filter_audio_l.out.writeBuf, count);
+			process_deemphasis(deemphasis_alpha, &deemphasis_state_r, filter_audio_r.out.writeBuf, count);
+		}
 
 		//Interleave the two audio channels
 		dsp::convert::LRToStereo::process(count, filter_audio_l.out.writeBuf, filter_audio_r.out.writeBuf, interleaved_buffer);
