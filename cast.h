@@ -10,10 +10,10 @@
 class fmice_icecast {
 
 public:
-	fmice_icecast(const char* host, unsigned short port, const char* mount, const char* username, const char* password);
+	fmice_icecast(const char* host, unsigned short port, const char* mount, const char* username, const char* password, int channels, int sampRate);
 	~fmice_icecast();
 
-	void push(float sample);
+	void push(float* samples, int count);
 
 private:
 	shout_t* shout;
@@ -22,6 +22,7 @@ private:
 	size_t samples_sent;
 	size_t samples_dropped;
 	pthread_t worker_thread;
+	int channels;
 
 	// In buffer - This is what cast_push_sample accesses and should only be used by its thread
 	int32_t in_buffer[CAST_BUFFER_SIZE];

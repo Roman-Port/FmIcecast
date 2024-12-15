@@ -11,13 +11,14 @@
 
 static int is_icecast_initialized = 0;
 
-fmice_icecast::fmice_icecast(const char* host, unsigned short port, const char* mount, const char* username, const char* password) {
+fmice_icecast::fmice_icecast(const char* host, unsigned short port, const char* mount, const char* username, const char* password, int channels, int sampRate) {
     //Init buffer
     circ_buffer = new fmice_circular_buffer<int32_t>(CAST_BUFFER_SIZE * CAST_FIFOS_COUNT);
 
     //Clear
     samples_dropped = 0;
     samples_sent = 0;
+    this->channels = channels;
 
     //Init global icecast if it's not
     if (!is_icecast_initialized)
@@ -62,10 +63,10 @@ fmice_icecast::fmice_icecast(const char* host, unsigned short port, const char* 
     //Set up FLAC
     FLAC__stream_encoder_set_verify(flac, false);
     FLAC__stream_encoder_set_compression_level(flac, 5);
-    FLAC__stream_encoder_set_channels(flac, 1);
+    FLAC__stream_encoder_set_channels(flac, channels);
     FLAC__stream_encoder_set_bits_per_sample(flac, 16);
-    FLAC__stream_encoder_set_sample_rate(flac, MPX_SAMP_RATE);
-    FLAC__stream_encoder_set_total_samples_estimate(flac, 1000);
+    FLAC__stream_encoder_set_sample_rate(flac, sampRate);
+    FLAC__stream_encoder_set_total_samples_estimate(flac, 0);
 
     //Init encoder
     if (FLAC__stream_encoder_init_ogg_stream(flac, 0, flac_push_cb_static, 0, 0, 0, this) != FLAC__STREAM_ENCODER_INIT_STATUS_OK)
@@ -106,7 +107,7 @@ int fmice_icecast::work() {
     circ_buffer->read(working_buffer, CAST_BUFFER_SIZE);
 
     //Send on wire
-    if (!FLAC__stream_encoder_process_interleaved(flac, working_buffer, CAST_BUFFER_SIZE)) {
+    if (!FLAC__stream_encoder_process_interleaved(flac, working_buffer, CAST_BUFFER_SIZE / channels)) {
         printf("Failed to encode FLAC data: %s\n", FLAC__StreamEncoderStateString[FLAC__stream_encoder_get_state(flac)]);
         return -1;
     }
@@ -114,28 +115,42 @@ int fmice_icecast::work() {
     return 0;
 }
 
-void fmice_icecast::push(float sample) {
-    //Clip check, then push into the buffer
-    if (sample > 1) {
-        sample = 1;
-        printf("WARN: Sample %f clips >1!\n", sample);
-    }
-    else if (sample < -1) {
-        sample = -1;
-        printf("WARN: Sample %f clips <-1!\n", sample);
-    }
-    in_buffer[in_buffer_use++] = (int32_t)(sample * 32767);
+void fmice_icecast::push(float* samples, int count) {
+    while (count > 0) {
+        //Determine how much we can write to the buffer
+        int readable = std::min(count, CAST_BUFFER_SIZE - in_buffer_use);
 
-    //Check if the buffer is ready to be submitted
-    if (in_buffer_use == CAST_BUFFER_SIZE) {
-        //Push into circular buffer
-        size_t dropped = CAST_BUFFER_SIZE - circ_buffer->write(in_buffer, CAST_BUFFER_SIZE);
-        if (dropped > 0) {
-            samples_dropped += dropped;
-            printf("WARN: Audio samples dropped! Network can't keep up. Dropped %i samples so far.\n", samples_dropped);
+        //Loop through and remove any clipping samples - they break FLAC
+        for (int i = 0; i < readable; i++) {
+            if (samples[i] > 1) {
+                printf("WARN: Sample %f clips >1!\n", samples[i]);
+                samples[i] = 1;
+            }
+            if (samples[i] < -1) {
+                printf("WARN: Sample %f clips <-1!\n", samples[i]);
+                samples[i] = -1;
+            }
         }
 
-        //Finally, reset counter
-        in_buffer_use = 0;
+        //Read and convert simultaenously
+        volk_32f_s32f_convert_32i(&in_buffer[in_buffer_use], samples, 32767, readable);
+
+        //Update states
+        in_buffer_use += readable;
+        samples += readable;
+        count -= readable;
+
+        //If buffer is full, process
+        if (in_buffer_use == CAST_BUFFER_SIZE) {
+            //Push into circular buffer
+            size_t dropped = CAST_BUFFER_SIZE - circ_buffer->write(in_buffer, CAST_BUFFER_SIZE);
+            if (dropped > 0) {
+                samples_dropped += dropped;
+                printf("WARN: Audio samples dropped! Network can't keep up. Dropped %i samples so far.\n", samples_dropped);
+            }
+
+            //Finally, reset counter
+            in_buffer_use = 0;
+        }
     }
 }

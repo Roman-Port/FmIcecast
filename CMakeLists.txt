@@ -19,8 +19,11 @@ pkg_check_modules(libairspyhf REQUIRED IMPORTED_TARGET libairspyhf)
 pkg_check_modules(shout REQUIRED IMPORTED_TARGET shout)
 pkg_check_modules(flac REQUIRED IMPORTED_TARGET flac)
 
+# Add SDR++ DSP
+add_subdirectory(dsp)
+
 # Add main
 add_executable (fmice "main.cpp" "radio.cpp" "fifo.cpp" "taps.cpp" "fast_atan2.cpp" "cast.cpp" "circular_buffer.cpp")
 
 # Link
-target_link_libraries(fmice Volk::volk airspyhf shout FLAC Threads::Threads)
+target_link_libraries(fmice Volk::volk airspyhf shout FLAC Threads::Threads sdrpp_dsp)

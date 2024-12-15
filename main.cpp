@@ -11,8 +11,8 @@ int main() {
 
 	//Connect to Icecast
 	printf("Connecting to Icecast...\n");
-	fmice_icecast* ice = new fmice_icecast("ice.romanport.com", 80, "/kzcr-composite", "source", "Urgkq5HA2u3Q4oksjjpCrXqt");
-	radio->set_mpx_output(ice);
+	fmice_icecast* ice = new fmice_icecast("ice.romanport.com", 80, "/kzcr-composite", "source", "Urgkq5HA2u3Q4oksjjpCrXqt", 2, AUDIO_SAMP_RATE);
+	radio->set_audio_output(ice);
 
 	//Start the radio
 	printf("Starting radio...\n");
