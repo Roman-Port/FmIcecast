@@ -14,8 +14,6 @@
 #include <dsp/convert/l_r_to_stereo.h>
 #include <cassert>
 
-#define FM_DEVIATION 85000
-
 #define RADIO_BUFFER_SIZE 65536
 
 fmice_radio::fmice_radio(fmice_radio_settings_t settings) {
@@ -69,9 +67,9 @@ fmice_radio::fmice_radio(fmice_radio_settings_t settings) {
 
 	//Set up delays
 	lpr_delay.init(NULL, ((pilot_filter_taps.size - 1) / 2) + 1);
-	pilot_pll.out.setBufferSize(RADIO_BUFFER_SIZE);
+	lpr_delay.out.setBufferSize(RADIO_BUFFER_SIZE);
 	lmr_delay.init(NULL, ((pilot_filter_taps.size - 1) / 2) + 1);
-	pilot_pll.out.setBufferSize(RADIO_BUFFER_SIZE);
+	lmr_delay.out.setBufferSize(RADIO_BUFFER_SIZE);
 
 	//Create audio filters
 	filter_audio_taps = dsp::taps::lowPass(15000.0, 4000.0, MPX_SAMP_RATE);
@@ -89,7 +87,7 @@ fmice_radio::fmice_radio(fmice_radio_settings_t settings) {
 }
 
 fmice_radio::~fmice_radio() {
-
+	//TODO
 }
 
 void fmice_radio::set_mpx_output(fmice_icecast* ice) {
@@ -189,24 +187,30 @@ void fmice_radio::work() {
 		pilot_filter.process(count, rtoc.out.writeBuf, pilot_filter.out.writeBuf);
 		pilot_pll.process(count, pilot_filter.out.writeBuf, pilot_pll.out.writeBuf);
 
-		//Delay
-		lpr_delay.process(count, filter_mpx.out.writeBuf, filter_mpx.out.writeBuf);
+		//Delay to keep in phase with stereo pilot - One is real and one is complex
+		lpr_delay.process(count, filter_mpx.out.writeBuf, lpr_delay.out.writeBuf);
 		lmr_delay.process(count, rtoc.out.writeBuf, lmr_delay.out.writeBuf);
 
-		//Conjugate PLL output to down convert twice the L-R signal
+		//Square pilot to go from 19 kHz to 38 kHz
+		//volk_32fc_x2_multiply_32fc((lv_32fc_t*)pilot_pll.out.writeBuf, (lv_32fc_t*)pilot_pll.out.writeBuf, (lv_32fc_t*)pilot_pll.out.writeBuf, count);
+
+		//Multiply composite by this to recover L-R in lmr_delay.out.writeBuf
+		//volk_32fc_x2_multiply_32fc((lv_32fc_t*)lmr_delay.out.writeBuf, (lv_32fc_t*)pilot_pll.out.writeBuf, (lv_32fc_t*)lmr_delay.out.writeBuf, count);
+
+		//Conjugate and multiply to downconvert the 38 kHz down to baseband
 		dsp::math::Conjugate::process(count, pilot_pll.out.writeBuf, pilot_pll.out.writeBuf);
 		dsp::math::Multiply<dsp::complex_t>::process(count, lmr_delay.out.writeBuf, pilot_pll.out.writeBuf, lmr_delay.out.writeBuf);
 		dsp::math::Multiply<dsp::complex_t>::process(count, lmr_delay.out.writeBuf, pilot_pll.out.writeBuf, lmr_delay.out.writeBuf);
 
-		//Convert output back to real for further processing
-		dsp::convert::ComplexToReal::process(count, lmr_delay.out.writeBuf, lmr);
+		//Convert L-R back to real for further processing - It's important to take the imaginary component and I don't know why
+		volk_32fc_deinterleave_imag_32f(lmr, (lv_32fc_t*)lmr_delay.out.writeBuf, count);
 
-		//Amplify by 2x
+		//Amplify L-R by 2x
 		volk_32f_s32f_multiply_32f(lmr, lmr, 2.0f, count);
 
 		//Do L = (L+R) + (L-R), R = (L+R) - (L-R)
-		dsp::math::Add<float>::process(count, filter_mpx.out.writeBuf, lmr, l);
-		dsp::math::Subtract<float>::process(count, filter_mpx.out.writeBuf, lmr, r);
+		dsp::math::Add<float>::process(count, lpr_delay.out.writeBuf, lmr, l);
+		dsp::math::Subtract<float>::process(count, lpr_delay.out.writeBuf, lmr, r);
 
 		//Filter both audio channels
 		int countL = filter_audio_l.process(count, l, filter_audio_l.out.writeBuf);
