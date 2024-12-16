@@ -2,7 +2,9 @@
 
 #include "cast.h"
 #include "circular_buffer.h"
-#include "libairspyhf/airspyhf.h"
+#include "stereo_demod.h"
+
+#include <libairspyhf/airspyhf.h>
 #include <dsp/filter/fir.h>
 #include <dsp/filter/decimating_fir.h>
 #include <dsp/demod/quadrature.h>
@@ -11,7 +13,7 @@
 #include <dsp/loop/pll.h>
 #include <dsp/math/delay.h>
 
-typedef struct fmice_radio_settings_t {
+struct fmice_radio_settings_t {
 
 	double fm_deviation;
 	double deemphasis_rate;
@@ -71,30 +73,11 @@ private:
 	dsp::complex_t* filter_bb_buffer;
 
 	dsp::demod::Quadrature fm_demod;
+	fmice_stereo_demod stereo_decoder;
 
 	dsp::tap<float> filter_mpx_taps;
 	dsp::filter::DecimatingFIR<float, float> filter_mpx;
 
-	dsp::convert::RealToComplex rtoc;
-
-	dsp::tap<dsp::complex_t> pilot_filter_taps;
-	dsp::filter::FIR<dsp::complex_t, dsp::complex_t> pilot_filter;
-
-	dsp::loop::PLL pilot_pll;
-	dsp::math::Delay<float> lpr_delay;
-	dsp::math::Delay<dsp::complex_t> lmr_delay;
-
-	dsp::tap<float> filter_audio_taps;
-	dsp::filter::DecimatingFIR<float, float> filter_audio_l;
-	dsp::filter::DecimatingFIR<float, float> filter_audio_r;
-
-	float deemphasis_alpha;
-	float deemphasis_state_l;
-	float deemphasis_state_r;
-
-	float* lmr;
-	float* l;
-	float* r;
 	dsp::stereo_t* interleaved_buffer;
 
 	fmice_icecast* output_mpx; // May be null

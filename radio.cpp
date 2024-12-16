@@ -1,8 +1,10 @@
 #include "defines.h"
 
-#include "stdio.h"
-#include "stdint.h"
-#include "string.h"
+#include <stdio.h>
+#include <stdint.h>
+#include <string.h>
+#include <cassert>
+
 #include "radio.h"
 
 #include <dsp/taps/low_pass.h>
@@ -12,29 +14,24 @@
 #include <dsp/math/add.h>
 #include <dsp/math/subtract.h>
 #include <dsp/convert/l_r_to_stereo.h>
-#include <cassert>
 
 #define RADIO_BUFFER_SIZE 65536
 
-fmice_radio::fmice_radio(fmice_radio_settings_t settings) {
+fmice_radio::fmice_radio(fmice_radio_settings_t settings) :
+	stereo_decoder(RADIO_BUFFER_SIZE)
+{
 	//Zero out everything
 	radio = 0;
 	radio_transfer_size = 0;
 	radio_buffer = 0;
 	output_mpx = 0;
 	output_audio = 0;
-	deemphasis_alpha = 0;
-	deemphasis_state_l = 0;
-	deemphasis_state_r = 0;
 
 	//Allocate buffers
 	size_t alignment = volk_get_alignment();
 	filter_bb_buffer = (dsp::complex_t*)volk_malloc(sizeof(dsp::complex_t) * RADIO_BUFFER_SIZE, alignment);
-	lmr = (float*)volk_malloc(sizeof(float) * RADIO_BUFFER_SIZE, alignment);
-	l = (float*)volk_malloc(sizeof(float) * RADIO_BUFFER_SIZE, alignment);
-	r = (float*)volk_malloc(sizeof(float) * RADIO_BUFFER_SIZE, alignment);
 	interleaved_buffer = (dsp::stereo_t*)volk_malloc(sizeof(dsp::stereo_t) * RADIO_BUFFER_SIZE, alignment);
-	if (filter_bb_buffer == 0 || lmr == 0 || l == 0 || r == 0 || interleaved_buffer == 0)
+	if (filter_bb_buffer == 0 || interleaved_buffer == 0)
 		throw std::runtime_error("Failed to allocate buffers.");
 	radio_buffer = new fmice_circular_buffer<airspyhf_complex_float_t>(RADIO_BUFFER_SIZE * 16);
 
@@ -54,36 +51,8 @@ fmice_radio::fmice_radio(fmice_radio_settings_t settings) {
 	filter_mpx.init(NULL, filter_mpx_taps, DECIM_RATE);
 	filter_mpx.out.setBufferSize(RADIO_BUFFER_SIZE);
 
-	//Create pilot filter
-	rtoc.init(NULL);
-	pilot_filter_taps = dsp::taps::bandPass<dsp::complex_t>(18750.0, 19250.0, 3000.0, MPX_SAMP_RATE, true);
-	printf("19 kHz pilot filter taps: %i\n", pilot_filter_taps.size);
-	pilot_filter.init(NULL, pilot_filter_taps);
-	pilot_filter.out.setBufferSize(RADIO_BUFFER_SIZE);
-
-	//Initialize PLL for pilot
-	pilot_pll.init(NULL, 25000.0 / MPX_SAMP_RATE, 0.0, dsp::math::hzToRads(19000.0, MPX_SAMP_RATE), dsp::math::hzToRads(18750.0, MPX_SAMP_RATE), dsp::math::hzToRads(19250.0, MPX_SAMP_RATE));
-	pilot_pll.out.setBufferSize(RADIO_BUFFER_SIZE);
-
-	//Set up delays
-	lpr_delay.init(NULL, ((pilot_filter_taps.size - 1) / 2) + 1);
-	lpr_delay.out.setBufferSize(RADIO_BUFFER_SIZE);
-	lmr_delay.init(NULL, ((pilot_filter_taps.size - 1) / 2) + 1);
-	lmr_delay.out.setBufferSize(RADIO_BUFFER_SIZE);
-
-	//Create audio filters
-	filter_audio_taps = dsp::taps::lowPass(15000.0, 4000.0, MPX_SAMP_RATE);
-	printf("Audio filter taps: %i\n", filter_audio_taps.size);
-	filter_audio_l.init(NULL, filter_audio_taps, AUDIO_DECIM_RATE);
-	filter_audio_l.out.setBufferSize(RADIO_BUFFER_SIZE);
-	filter_audio_r.init(NULL, filter_audio_taps, AUDIO_DECIM_RATE);
-	filter_audio_r.out.setBufferSize(RADIO_BUFFER_SIZE);
-
-	//Calculate deemphesis alpha
-	if (settings.deemphasis_rate != 0)
-		deemphasis_alpha = 1.0f - exp(-1.0f / (AUDIO_SAMP_RATE * (settings.deemphasis_rate * 1e-6f)));
-	else
-		deemphasis_alpha = 0;
+	//Configure stereo decoder
+	stereo_decoder.init(MPX_SAMP_RATE, AUDIO_DECIM_RATE, settings.aud_filter_cutoff, settings.aud_filter_trans, settings.deemphasis_rate);
 }
 
 fmice_radio::~fmice_radio() {
@@ -153,14 +122,6 @@ int fmice_radio::airspyhf_rx_cb(airspyhf_transfer_t* transfer) {
 	return 0;
 }
 
-void process_deemphasis(float alpha, float* state, float* buffer, int count) {
-	for (int i = 0; i < count; i++)
-	{
-		*state += alpha * (buffer[i] - *state);
-		buffer[i] = *state;
-	}
-}
-
 void fmice_radio::work() {
 	//Read into buffer
 	int count = radio_buffer->read((airspyhf_complex_float_t*)filter_bb_buffer, RADIO_BUFFER_SIZE);
@@ -180,54 +141,10 @@ void fmice_radio::work() {
 
 	//Demodulate audio if there's an output for it
 	if (output_audio != 0) {
-		//Convert to complex
-		rtoc.process(count, filter_mpx.out.writeBuf, rtoc.out.writeBuf);
-
-		//Filter out pilot and run through PLL
-		pilot_filter.process(count, rtoc.out.writeBuf, pilot_filter.out.writeBuf);
-		pilot_pll.process(count, pilot_filter.out.writeBuf, pilot_pll.out.writeBuf);
-
-		//Delay to keep in phase with stereo pilot - One is real and one is complex
-		lpr_delay.process(count, filter_mpx.out.writeBuf, lpr_delay.out.writeBuf);
-		lmr_delay.process(count, rtoc.out.writeBuf, lmr_delay.out.writeBuf);
-
-		//Square pilot to go from 19 kHz to 38 kHz
-		//volk_32fc_x2_multiply_32fc((lv_32fc_t*)pilot_pll.out.writeBuf, (lv_32fc_t*)pilot_pll.out.writeBuf, (lv_32fc_t*)pilot_pll.out.writeBuf, count);
-
-		//Multiply composite by this to recover L-R in lmr_delay.out.writeBuf
-		//volk_32fc_x2_multiply_32fc((lv_32fc_t*)lmr_delay.out.writeBuf, (lv_32fc_t*)pilot_pll.out.writeBuf, (lv_32fc_t*)lmr_delay.out.writeBuf, count);
-
-		//Conjugate and multiply to downconvert the 38 kHz down to baseband
-		dsp::math::Conjugate::process(count, pilot_pll.out.writeBuf, pilot_pll.out.writeBuf);
-		dsp::math::Multiply<dsp::complex_t>::process(count, lmr_delay.out.writeBuf, pilot_pll.out.writeBuf, lmr_delay.out.writeBuf);
-		dsp::math::Multiply<dsp::complex_t>::process(count, lmr_delay.out.writeBuf, pilot_pll.out.writeBuf, lmr_delay.out.writeBuf);
-
-		//Convert L-R back to real for further processing - It's important to take the imaginary component and I don't know why
-		volk_32fc_deinterleave_imag_32f(lmr, (lv_32fc_t*)lmr_delay.out.writeBuf, count);
-
-		//Amplify L-R by 2x
-		volk_32f_s32f_multiply_32f(lmr, lmr, 2.0f, count);
-
-		//Do L = (L+R) + (L-R), R = (L+R) - (L-R)
-		dsp::math::Add<float>::process(count, lpr_delay.out.writeBuf, lmr, l);
-		dsp::math::Subtract<float>::process(count, lpr_delay.out.writeBuf, lmr, r);
-
-		//Filter both audio channels
-		int countL = filter_audio_l.process(count, l, filter_audio_l.out.writeBuf);
-		count = filter_audio_r.process(count, r, filter_audio_r.out.writeBuf);
-		assert(countL == count);
-
-		//Apply deemphesis
-		if (deemphasis_alpha != 0) {
-			process_deemphasis(deemphasis_alpha, &deemphasis_state_l, filter_audio_l.out.writeBuf, count);
-			process_deemphasis(deemphasis_alpha, &deemphasis_state_r, filter_audio_r.out.writeBuf, count);
-		}
-
-		//Interleave the two audio channels
-		dsp::convert::LRToStereo::process(count, filter_audio_l.out.writeBuf, filter_audio_r.out.writeBuf, interleaved_buffer);
-		count *= 2;
+		//Process stereo
+		int audCount = stereo_decoder.process(filter_mpx.out.writeBuf, interleaved_buffer, count);
 
 		//Send to output
-		output_audio->push((float*)interleaved_buffer, count);
+		output_audio->push((float*)interleaved_buffer, audCount * 2);
 	}
 }

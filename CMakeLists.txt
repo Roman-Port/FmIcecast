@@ -23,7 +23,9 @@ pkg_check_modules(flac REQUIRED IMPORTED_TARGET flac)
 add_subdirectory(dsp)
 
 # Add main
-add_executable (fmice "main.cpp" "radio.cpp"    "cast.cpp" "circular_buffer.cpp")
+add_executable (fmice "main.cpp" "radio.cpp" "stereo_demod.cpp" "cast.cpp" "circular_buffer.cpp")
+#add_executable (fmice "test.cpp" "stereo_demod.cpp" "stereo_demod.h")
 
 # Link
 target_link_libraries(fmice Volk::volk airspyhf shout FLAC Threads::Threads sdrpp_dsp)
+#target_link_libraries(fmice Volk::volk Threads::Threads sdrpp_dsp)
