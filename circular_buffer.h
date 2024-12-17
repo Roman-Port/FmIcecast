@@ -25,6 +25,15 @@ public:
 	/// <returns></returns>
 	size_t read(T* output, size_t count);
 
+	size_t get_size();
+	size_t get_use();
+	size_t get_free();
+
+	/// <summary>
+	/// Clears all samples in the circular buffer. Thread safe.
+	/// </summary>
+	void reset();
+
 private:
 	pthread_mutex_t cast_lock;
 	pthread_cond_t cast_cond;

@@ -15,6 +15,8 @@
 
 struct fmice_radio_settings_t {
 
+	bool enable_status;
+
 	double fm_deviation;
 	double deemphasis_rate;
 
@@ -83,7 +85,12 @@ private:
 	fmice_icecast* output_mpx; // May be null
 	fmice_icecast* output_audio; // May be null
 
+	bool enable_status;
+	int samples_since_last_status;
+
 	static int airspyhf_rx_cb_static(airspyhf_transfer_t* transfer);
 	int airspyhf_rx_cb(airspyhf_transfer_t* transfer);
+
+	void print_status();
 
 };

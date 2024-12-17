@@ -23,7 +23,7 @@ pkg_check_modules(flac REQUIRED IMPORTED_TARGET flac)
 add_subdirectory(dsp)
 
 # Add main
-add_executable (fmice "main.cpp" "radio.cpp" "stereo_demod.cpp" "cast.cpp" "circular_buffer.cpp")
+add_executable (fmice "main.cpp" "radio.cpp" "stereo_demod.cpp" "cast.cpp" "circular_buffer.cpp" "codec.cpp" "codec.h" "codecs/codec_flac.cpp")
 #add_executable (fmice "test.cpp" "stereo_demod.cpp" "stereo_demod.h")
 
 # Link

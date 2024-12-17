@@ -18,22 +18,22 @@
 #define RADIO_BUFFER_SIZE 65536
 
 fmice_radio::fmice_radio(fmice_radio_settings_t settings) :
-	stereo_decoder(RADIO_BUFFER_SIZE)
+	radio(NULL),
+	radio_transfer_size(0),
+	radio_buffer(0),
+	output_mpx(0),
+	output_audio(0),
+	samples_since_last_status(0),
+	stereo_decoder(RADIO_BUFFER_SIZE),
+	enable_status(settings.enable_status)
 {
-	//Zero out everything
-	radio = 0;
-	radio_transfer_size = 0;
-	radio_buffer = 0;
-	output_mpx = 0;
-	output_audio = 0;
-
 	//Allocate buffers
 	size_t alignment = volk_get_alignment();
 	filter_bb_buffer = (dsp::complex_t*)volk_malloc(sizeof(dsp::complex_t) * RADIO_BUFFER_SIZE, alignment);
 	interleaved_buffer = (dsp::stereo_t*)volk_malloc(sizeof(dsp::stereo_t) * RADIO_BUFFER_SIZE, alignment);
 	if (filter_bb_buffer == 0 || interleaved_buffer == 0)
 		throw std::runtime_error("Failed to allocate buffers.");
-	radio_buffer = new fmice_circular_buffer<airspyhf_complex_float_t>(RADIO_BUFFER_SIZE * 16);
+	radio_buffer = new fmice_circular_buffer<airspyhf_complex_float_t>(SAMP_RATE);
 
 	//Create baseband filter
 	filter_bb_taps = dsp::taps::lowPass(settings.bb_filter_cutoff, settings.bb_filter_trans, SAMP_RATE);
@@ -122,9 +122,46 @@ int fmice_radio::airspyhf_rx_cb(airspyhf_transfer_t* transfer) {
 	return 0;
 }
 
+static const char* ICECAST_STATUS_NAMES[4] = {
+	"init",
+	"connecting",
+	"ok",
+	"lost"
+};
+
+static void print_output_status(char* output, const char* name, fmice_icecast* cast) {
+	//If icecast is NULL, don't print anything
+	if (cast == NULL) {
+		output[0] = 0;
+		return;
+	}
+
+	//Format
+	sprintf(output, "%s=[status=%s; retries=%i]; ", name, ICECAST_STATUS_NAMES[cast->get_status()], cast->get_retries());
+}
+
+void fmice_radio::print_status() {
+	//Format status
+	char outputMpxStatus[256];
+	print_output_status(outputMpxStatus, "mpx_icecast", output_mpx);
+	char outputAudStatus[256];
+	print_output_status(outputAudStatus, "aud_icecast", output_audio);
+
+	//Write status
+	printf("[STATUS] radio_fifo_use=%i%% %s%s\n",
+		(radio_buffer->get_use() * 100) / radio_buffer->get_size(),
+		outputMpxStatus,
+		outputAudStatus
+	);
+
+	//Reset counter
+	samples_since_last_status = 0;
+}
+
 void fmice_radio::work() {
 	//Read into buffer
 	int count = radio_buffer->read((airspyhf_complex_float_t*)filter_bb_buffer, RADIO_BUFFER_SIZE);
+	samples_since_last_status += count;
 
 	//Filter baseband
 	count = filter_bb.process(count, filter_bb_buffer, filter_bb.out.writeBuf);
@@ -147,4 +184,8 @@ void fmice_radio::work() {
 		//Send to output
 		output_audio->push(interleaved_buffer, audCount);
 	}
+
+	//Write status once every second
+	if (enable_status && samples_since_last_status >= SAMP_RATE)
+		print_status();
 }

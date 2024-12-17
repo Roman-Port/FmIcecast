@@ -103,6 +103,44 @@ size_t fmice_circular_buffer<T>::read(T* output, size_t count) {
     return read;
 }
 
+template <typename T>
+void fmice_circular_buffer<T>::reset() {
+    //Lock
+    pthread_mutex_lock(&cast_lock);
+
+    //Re-initialize
+    use = 0;
+    pos_write = 0;
+    pos_read = 0;
+
+    //Unlock
+    pthread_mutex_unlock(&cast_lock);
+}
+
+template <typename T>
+size_t fmice_circular_buffer<T>::get_size() {
+    return size;
+}
+
+template <typename T>
+size_t fmice_circular_buffer<T>::get_use() {
+    //Lock
+    pthread_mutex_lock(&cast_lock);
+
+    //Read
+    size_t result = use;
+
+    //Unlock
+    pthread_mutex_unlock(&cast_lock);
+
+    return use;
+}
+
+template <typename T>
+size_t fmice_circular_buffer<T>::get_free() {
+    return get_size() - get_use();
+}
+
 template class fmice_circular_buffer<float>;
 template class fmice_circular_buffer<int32_t>;
 template class fmice_circular_buffer<airspyhf_complex_float_t>;

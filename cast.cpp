@@ -2,37 +2,37 @@
 #include <stdio.h>
 
 #include <string.h>
+#include <unistd.h>
 #include <pthread.h>
 #include <stdexcept>
+#include <cassert>
 #include "circular_buffer.h"
 #include "cast.h"
+#include "codecs/codec_flac.h"
+#include <signal.h>
 
 #define NET_BUFFER_BYTES 65536
 
 static int is_icecast_initialized = 0;
 
-fmice_icecast::fmice_icecast(int channels, int sampRate, int inputBufferSamples) {
+fmice_icecast::fmice_icecast(int channels, int sampRate, fmice_codec* codec) {
     //Set parameters
     this->channels = channels;
     this->sample_rate = sampRate;
-    this->input_buffer_samples = inputBufferSamples;
+    this->codec = codec;
 
-    //Allocate the input buffer
-    input_buffer = (int32_t*)malloc(sizeof(int32_t) * inputBufferSamples * channels);
-    if (input_buffer == NULL)
-        throw new std::runtime_error("Failed to allocate input buffer.");
+    //Init mutex
+    if (pthread_mutex_init(&mutex, NULL) != 0)
+        throw new std::runtime_error("Failed to initialize mutex.");
 
-    //Init buffer
-    circ_buffer = new fmice_circular_buffer<uint8_t>(NET_BUFFER_BYTES * 32);
-
-    //Clear
-    samples_dropped = 0;
-    samples_sent = 0;
+    //Clear setup/stat vars
     memset(icecast_host, 0, sizeof(icecast_host));
     icecast_port = 0;
     memset(icecast_mount, 0, sizeof(icecast_mount));
     memset(icecast_username, 0, sizeof(icecast_username));
     memset(icecast_password, 0, sizeof(icecast_password));
+    stat_status = FMICE_ICECAST_STATUS_INIT;
+    stat_retries = 0;
 
     //Init global icecast if it's not
     if (!is_icecast_initialized)
@@ -41,7 +41,8 @@ fmice_icecast::fmice_icecast(int channels, int sampRate, int inputBufferSamples)
 }
 
 fmice_icecast::~fmice_icecast() {
-
+    //Destroy mutex
+    pthread_mutex_destroy(&mutex);
 }
 
 void fmice_icecast::set_host(const char* hostname) {
@@ -68,6 +69,32 @@ void fmice_icecast::set_password(const char* password) {
     icecast_password[sizeof(icecast_password) - 1] = 0;
 }
 
+int fmice_icecast::get_status() {
+    pthread_mutex_lock(&mutex);
+    int result = stat_status;
+    pthread_mutex_unlock(&mutex);
+    return result;
+}
+
+int fmice_icecast::get_retries() {
+    pthread_mutex_lock(&mutex);
+    int result = stat_retries;
+    pthread_mutex_unlock(&mutex);
+    return result;
+}
+
+void fmice_icecast::set_status(int req) {
+    pthread_mutex_lock(&mutex);
+    stat_status = req;
+    pthread_mutex_unlock(&mutex);
+}
+
+void fmice_icecast::inc_retries() {
+    pthread_mutex_lock(&mutex);
+    stat_retries++;
+    pthread_mutex_unlock(&mutex);
+}
+
 bool fmice_icecast::is_configured() {
     return strlen(icecast_host) > 0 &&
         icecast_port > 0 &&
@@ -81,117 +108,26 @@ void fmice_icecast::init() {
     if (!is_configured())
         throw new std::runtime_error("Icecast is not configured.");
 
-    //Allocate shoutcast
-    shout = shout_new();
-    if (!shout)
-        throw new std::runtime_error("Failed to allocate shout_t.\n");
-
-    //Set up paramters
-    if (shout_set_host(shout, icecast_host) != SHOUTERR_SUCCESS)
-        throw new std::runtime_error("Error setting hostname.");
-    if (shout_set_protocol(shout, SHOUT_PROTOCOL_HTTP) != SHOUTERR_SUCCESS)
-        throw new std::runtime_error("Error setting protocol.");
-    if (shout_set_port(shout, icecast_port) != SHOUTERR_SUCCESS)
-        throw new std::runtime_error("Error setting port.");
-    if (shout_set_password(shout, icecast_password) != SHOUTERR_SUCCESS)
-        throw new std::runtime_error("Error setting password.");
-    if (shout_set_mount(shout, icecast_mount) != SHOUTERR_SUCCESS)
-        throw new std::runtime_error("Error setting mount.");
-    if (shout_set_user(shout, icecast_username) != SHOUTERR_SUCCESS)
-        throw new std::runtime_error("Error setting user.");
-    if (shout_set_content_format(shout, SHOUT_FORMAT_OGG, SHOUT_USAGE_UNKNOWN, NULL) != SHOUTERR_SUCCESS)
-        throw new std::runtime_error("Error setting format.");
-
-    //Connect
-    if (shout_open(shout) != SHOUTERR_SUCCESS) {
-        throw new std::runtime_error("Failed to connect to server.");
-    }
-
-    //Now, allocate FLAC
-    flac = FLAC__stream_encoder_new();
-    if (!flac)
-        throw new std::runtime_error("Failed to allocate FLAC.");
-
-    //Set up FLAC
-    FLAC__stream_encoder_set_verify(flac, false);
-    FLAC__stream_encoder_set_compression_level(flac, 5);
-    FLAC__stream_encoder_set_channels(flac, channels);
-    FLAC__stream_encoder_set_bits_per_sample(flac, 16);
-    FLAC__stream_encoder_set_sample_rate(flac, sample_rate);
-    FLAC__stream_encoder_set_total_samples_estimate(flac, 0);
-
-    //Init encoder
-    if (FLAC__stream_encoder_init_ogg_stream(flac, 0, flac_push_cb_static, 0, 0, 0, this) != FLAC__STREAM_ENCODER_INIT_STATUS_OK)
-        throw new std::runtime_error("Failed to init FLAC stream.");
-
     //Start worker thread
     pthread_create(&worker_thread, NULL, work_static, this);
 }
 
-FLAC__StreamEncoderWriteStatus fmice_icecast::flac_push_cb_static(const FLAC__StreamEncoder* encoder, const FLAC__byte buffer[], size_t bytes, uint32_t samples, uint32_t current_frame, void* client_data) {
-    return ((fmice_icecast*)client_data)->flac_push_cb(encoder, buffer, bytes, samples, current_frame);
-}
-
 void fmice_icecast::push(dsp::stereo_t* samples, int count) {
-    push((float*)samples, count);
+    //If the status is not connected, discard the buffer
+    if (get_status() != FMICE_ICECAST_STATUS_OK)
+        return;
+
+    //Submit to codec for encoding
+    codec->write(samples, count);
 }
 
 void fmice_icecast::push(float* samples, int count) {
-    int readOffset = 0;
-    while (count > 0) {
-        //Determine how many samples PER CHANNEL we can write to the buffer (avail in buffer - avail in input)
-        int readable = std::min(count, input_buffer_samples - input_buffer_use);
+    //If the status is not connected, discard the buffer
+    if (get_status() != FMICE_ICECAST_STATUS_OK)
+        return;
 
-        //Read and convert simultaenously
-        volk_32f_s32f_convert_32i(&input_buffer[input_buffer_use * channels], &samples[readOffset * channels], 32767, readable * channels);
-
-        //Update states
-        input_buffer_use += readable;
-        readOffset += readable;
-        count -= readable;
-
-        //If buffer is full, process
-        if (input_buffer_use == input_buffer_samples)
-            submit_buffer();
-    }
-}
-
-void fmice_icecast::submit_buffer() {
-    //Check all samples for clipping - They break FLAC
-    int clipping = 0;
-    for (int i = 0; i < input_buffer_samples * channels; i++) {
-        if (input_buffer[i] > 32767) {
-            input_buffer[i] = 32767;
-            clipping++;
-        }
-        if (input_buffer[i] < -32767) {
-            input_buffer[i] = -32767;
-            clipping++;
-        }
-    }
-
-    //Warn on clipping
-    if (clipping > 0)
-        printf("[CAST] WARN: %i samples in block were clipping.\n", clipping);
-
-    //Process with FLAC
-    if (!FLAC__stream_encoder_process_interleaved(flac, input_buffer, input_buffer_samples)) {
-        printf("[CAST} ERR: Failed to encode FLAC data: %s\n", FLAC__StreamEncoderStateString[FLAC__stream_encoder_get_state(flac)]);
-    }
-
-    //Reset state
-    input_buffer_use = 0;
-}
-
-FLAC__StreamEncoderWriteStatus fmice_icecast::flac_push_cb(const FLAC__StreamEncoder* encoder, const FLAC__byte buffer[], size_t count, uint32_t samples, uint32_t current_frame) {
-    //Push into circular buffer
-    size_t dropped = count - circ_buffer->write((const uint8_t*)buffer, count);
-    if (dropped > 0) {
-        samples_dropped += dropped;
-        printf("WARN: FLAC data dropped! Network can't keep up. Dropped %i bytes so far.\n", samples_dropped);
-    }
-
-    return FLAC__STREAM_ENCODER_WRITE_STATUS_OK;
+    //Submit to codec for encoding
+    codec->write(samples, count);
 }
 
 void* fmice_icecast::work_static(void* ctx) {
@@ -200,14 +136,72 @@ void* fmice_icecast::work_static(void* ctx) {
 }
 
 void fmice_icecast::work() {
+    //Disable signal from icecast so we handle it ourselves (this caused me must anguish)
+    sigset_t set;
+    sigemptyset(&set);
+    sigaddset(&set, SIGPIPE);
+    pthread_sigmask(SIG_BLOCK, &set, NULL);
+
+    //Enter loop
+    shout_t* shout;
     uint8_t workingBuffer[NET_BUFFER_BYTES];
     while (1) {
-        //Wait for buffers to become available
-        circ_buffer->read(workingBuffer, NET_BUFFER_BYTES);
+        //Set status
+        set_status(FMICE_ICECAST_STATUS_CONNECTING);
 
-        //Send
-        if (shout_send(shout, workingBuffer, NET_BUFFER_BYTES) != SHOUTERR_SUCCESS) {
-            printf("Failed to send FLAC packet to Icecast: %s\n", shout_get_error(shout));
+        //Allocate shoutcast
+        //printf("[CAST] Connecting to Icecast...\n");
+        shout = shout_new();
+        assert(shout != NULL);
+
+        //Set up paramters
+        pthread_mutex_lock(&mutex);
+        shout_set_host(shout, icecast_host);
+        shout_set_protocol(shout, SHOUT_PROTOCOL_HTTP);
+        shout_set_port(shout, icecast_port);
+        shout_set_password(shout, icecast_password);
+        shout_set_mount(shout, icecast_mount);
+        shout_set_user(shout, icecast_username);
+        shout_set_content_format(shout, SHOUT_FORMAT_OGG, SHOUT_USAGE_UNKNOWN, NULL);
+        pthread_mutex_unlock(&mutex);
+
+        //Connect
+        if (shout_open(shout) == SHOUTERR_SUCCESS) {
+            //Set status
+            set_status(FMICE_ICECAST_STATUS_OK);
+
+            //Enter loop
+            while (1) {
+                //Wait for buffers to become available
+                int read = codec->read(workingBuffer, NET_BUFFER_BYTES);
+
+                //Send
+                if (shout_send(shout, workingBuffer, read) != SHOUTERR_SUCCESS) {
+                    //printf("[CAST] Failed to send packet to Icecast.\n");
+                    break;
+                }
+
+                //Check error flag
+                if (codec->has_error()) {
+                    //printf("[CAST] Codec encountered an error. Disconnecting...\n");
+                    break;
+                }
+            }
         }
+        else {
+            //Error establishing connection. Wait and try again
+            //printf("[CAST] Failed to establish connection. Retrying shortly...\n");
+            sleep(3);
+        }
+
+        //Destroy shoutcast
+        //printf("[CAST] Disconnecting from Icecast...\n");
+        set_status(FMICE_ICECAST_STATUS_CONNECTION_LOST);
+        inc_retries();
+        shout_close(shout);
+        shout_free(shout);
+
+        //Reset codec
+        codec->reset();
     }
 }

@@ -1,15 +1,19 @@
 #pragma once
 
-#include "circular_buffer.h"
+#include "codec.h"
 #include <stdint.h>
 #include <shout/shout.h>
-#include <FLAC/stream_encoder.h>
 #include <dsp/types.h>
+
+#define FMICE_ICECAST_STATUS_INIT 0
+#define FMICE_ICECAST_STATUS_CONNECTING 1
+#define FMICE_ICECAST_STATUS_OK 2
+#define FMICE_ICECAST_STATUS_CONNECTION_LOST 3
 
 class fmice_icecast {
 
 public:
-	fmice_icecast(int channels, int sampRate, int inputBufferSamples = 65536);
+	fmice_icecast(int channels, int sampRate, fmice_codec* codec);
 	~fmice_icecast();
 
 	void set_host(const char* hostname);
@@ -17,6 +21,9 @@ public:
 	void set_mount(const char* mount);
 	void set_username(const char* username);
 	void set_password(const char* password);
+
+	int get_status();
+	int get_retries();
 
 	bool is_configured();
 	void init();
@@ -27,36 +34,24 @@ public:
 private:
 	int channels;
 	int sample_rate;
-	int input_buffer_samples; // Number of samples PER CHANNEL in the input buffer
 
-	int32_t* input_buffer; // Length is input_buffer_samples * channels
-	int input_buffer_use; // Number of samples in the buffer PER CHANNEL
-
-	shout_t* shout;
-	FLAC__StreamEncoder* flac;
-	fmice_circular_buffer<uint8_t>* circ_buffer;
-	size_t samples_sent;
-	size_t samples_dropped;
-	pthread_t worker_thread;
-	
-
+	// Stats and settable settings - Protected by the mutex
+	pthread_mutex_t mutex;
 	char icecast_host[256];
 	unsigned short icecast_port;
 	char icecast_mount[256];
 	char icecast_username[256];
 	char icecast_password[256];
+	int stat_status;
+	int stat_retries;
 
-	
-
-	static FLAC__StreamEncoderWriteStatus flac_push_cb_static(const FLAC__StreamEncoder* encoder, const FLAC__byte buffer[], size_t bytes, uint32_t samples, uint32_t current_frame, void* client_data);
-	FLAC__StreamEncoderWriteStatus flac_push_cb(const FLAC__StreamEncoder* encoder, const FLAC__byte buffer[], size_t bytes, uint32_t samples, uint32_t current_frame);
+	fmice_codec* codec;
+	pthread_t worker_thread;
 
 	static void* work_static(void* ctx);
 	void work();
 
-	/// <summary>
-	/// Submits samples in the input buffer for processing
-	/// </summary>
-	void submit_buffer();
+	void set_status(int status);
+	void inc_retries();
 
 };

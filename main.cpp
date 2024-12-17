@@ -2,6 +2,7 @@
 #include "defines.h"
 #include "cast.h"
 #include "radio.h"
+#include "codecs/codec_flac.h"
 
 #include <getopt.h>
 
@@ -31,18 +32,16 @@ void help(char* pgm) {
 	printf("Usage: %s\n", pgm);
 	printf("    Basic Settings:\n");
 	printf("        [-f Radio frequency]\n");
-	printf("    MPX Icecast Settings:\n");
-	printf("        [--ice-mpx-host Composite Icecast hostname]\n");
-	printf("        [--ice-mpx-port Composite Icecast port]\n");
-	printf("        [--ice-mpx-mount Composite Icecast mountpoint]\n");
-	printf("        [--ice-mpx-user Composite Icecast username]\n");
-	printf("        [--ice-mpx-pass Composite Icecast password]\n");
-	printf("    Audio Icecast Settings:\n");
-	printf("        [--ice-aud-host Audio Icecast hostname]\n");
-	printf("        [--ice-aud-port Audio Icecast port]\n");
-	printf("        [--ice-aud-mount Audio Icecast mountpoint]\n");
-	printf("        [--ice-aud-user Audio Icecast username]\n");
-	printf("        [--ice-aud-pass Audio Icecast password]\n");
+	printf("        [-s Enable status output every 1s]\n");
+	printf("    Add Icecast Output:\n");
+	printf("        [--ice-mpx Composite Icecast codec <flac>]\n");
+	printf("        [--ice-aud Audio Icecast codec <flac>]\n");
+	printf("    Configure Icecast Output Settings:\n");
+	printf("        [-h Composite Icecast hostname]\n");
+	printf("        [-o Composite Icecast port]\n");
+	printf("        [-m Composite Icecast mountpoint]\n");
+	printf("        [-u Composite Icecast username]\n");
+	printf("        [-p Composite Icecast password]\n");
 	printf("    Advanced Settings:\n");
 	printf("        [--deviation FM deviation (default is %i)]\n", DEFAULT_FM_DEVIATION);
 	printf("        [--deemphasis FM deemphasis rate (default is %i - Set to 0 to disable)]\n", DEFAULT_DEEMPHASIS_RATE);
@@ -54,18 +53,23 @@ void help(char* pgm) {
 	printf("        [--aud-filter-trans Custom audio filter transition (default is %i hz)]\n", DEFAULT_AUD_FILTER_TRANS);
 }
 
+static fmice_icecast* create_icecast(const char* codecName, int channels, int sampRate) {
+	//Determine the codec to create
+	fmice_codec* codec;
+	if (strcmp(codecName, "flac") == 0)
+		codec = new fmice_codec_flac(sampRate, channels);
+	else {
+		printf("Unknown codec \"%s\". Options are: flac.\n", codecName);
+		return 0;
+	}
+
+	return new fmice_icecast(2, AUDIO_SAMP_RATE, codec);
+}
+
 int parse_args(int argc, char* argv[]) {
 	static const struct option long_opts[] = {
-		{ "ice-mpx-host", required_argument, NULL, 11 },
-		{ "ice-mpx-port", required_argument, NULL, 12 },
-		{ "ice-mpx-mount", required_argument, NULL, 13 },
-		{ "ice-mpx-user", required_argument, NULL, 14 },
-		{ "ice-mpx-pass", required_argument, NULL, 15 },
-		{ "ice-aud-host", required_argument, NULL, 21 },
-		{ "ice-aud-port", required_argument, NULL, 22 },
-		{ "ice-aud-mount", required_argument, NULL, 23 },
-		{ "ice-aud-user", required_argument, NULL, 24 },
-		{ "ice-aud-pass", required_argument, NULL, 25 },
+		{ "ice-mpx", required_argument, NULL, 11 },
+		{ "ice-aud", required_argument, NULL, 12 },
 		{ "deviation", required_argument, NULL, 31 },
 		{ "deemphasis", required_argument, NULL, 32 },
 		{ "bb-filter-cutoff", required_argument, NULL, 33 },
@@ -79,82 +83,68 @@ int parse_args(int argc, char* argv[]) {
 	};
 
 	int opt;
-	while ((opt = getopt_long(argc, argv, "f:", long_opts, NULL)) != -1) {
+	fmice_icecast* currentOutput = 0;
+	while ((opt = getopt_long(argc, argv, "f:h:o:m:u:p:s", long_opts, NULL)) != -1) {
 		switch (opt) {
 		
 		case 'f':
+			// FREQUENCY
 			frequency = parse_freq(optarg);
 			break;
 
+		case 's':
+			// ENABLE STATUS
+			radio_settings.enable_status = true;
+			break;
+
 		case 11:
-			// MPX ICECAST - HOST
+			// MPX ICECAST
 			if (icecast_mpx == 0)
-				icecast_mpx = new fmice_icecast(1, MPX_SAMP_RATE);
-			icecast_mpx->set_host(optarg);
+				icecast_mpx = create_icecast(optarg, 1, MPX_SAMP_RATE);
+			if (icecast_mpx == 0)
+				return -1;
+			currentOutput = icecast_mpx;
 			break;
 
 		case 12:
-			// MPX ICECAST - PORT
-			if (icecast_mpx == 0)
-				icecast_mpx = new fmice_icecast(1, MPX_SAMP_RATE);
-			icecast_mpx->set_port(atoi(optarg));
-			break;
-
-		case 13:
-			// MPX ICECAST - MOUNT
-			if (icecast_mpx == 0)
-				icecast_mpx = new fmice_icecast(1, MPX_SAMP_RATE);
-			icecast_mpx->set_mount(optarg);
-			break;
-
-		case 14:
-			// MPX ICECAST - USER
-			if (icecast_mpx == 0)
-				icecast_mpx = new fmice_icecast(1, MPX_SAMP_RATE);
-			icecast_mpx->set_username(optarg);
-			break;
-
-		case 15:
-			// MPX ICECAST - PASS
-			if (icecast_mpx == 0)
-				icecast_mpx = new fmice_icecast(1, MPX_SAMP_RATE);
-			icecast_mpx->set_password(optarg);
-			break;
-
-		case 21:
-			// AUDIO ICECAST - HOST
+			// AUDIO ICECAST
 			if (icecast_aud == 0)
-				icecast_aud = new fmice_icecast(2, AUDIO_SAMP_RATE);
-			icecast_aud->set_host(optarg);
-			break;
-
-		case 22:
-			// AUDIO ICECAST - PORT
+				icecast_aud = create_icecast(optarg, 2, AUDIO_SAMP_RATE);
 			if (icecast_aud == 0)
-				icecast_aud = new fmice_icecast(2, AUDIO_SAMP_RATE);
-			icecast_aud->set_port(atoi(optarg));
+				return -1;
+			currentOutput = icecast_aud;
 			break;
-
-		case 23:
-			// AUDIO ICECAST - MOUNT
-			if (icecast_aud == 0)
-				icecast_aud = new fmice_icecast(2, AUDIO_SAMP_RATE);
-			icecast_aud->set_mount(optarg);
-			break;
-
-		case 24:
-			// AUDIO ICECAST - USER
-			if (icecast_aud == 0)
-				icecast_aud = new fmice_icecast(2, AUDIO_SAMP_RATE);
-			icecast_aud->set_username(optarg);
-			break;
-
-		case 25:
-			// AUDIO ICECAST - PASS
-			if (icecast_aud == 0)
-				icecast_aud = new fmice_icecast(2, AUDIO_SAMP_RATE);
-			icecast_aud->set_password(optarg);
-			break;
+		
+		// BELOW ARE SETTINGS FOR ICECAST - Intended to be grouped together
+		case 'h':
+			if (currentOutput != 0) {
+				currentOutput->set_host(optarg);
+				break;
+			}
+		case 'o':
+			if (currentOutput != 0) {
+				currentOutput->set_port(atoi(optarg));
+				break;
+			}
+		case 'm':
+			if (currentOutput != 0) {
+				currentOutput->set_mount(optarg);
+				break;
+			}
+		case 'u':
+			if (currentOutput != 0) {
+				currentOutput->set_username(optarg);
+				break;
+			}
+		case 'p':
+			if (currentOutput != 0) {
+				currentOutput->set_password(optarg);
+				break;
+			}
+			else {
+				printf("Icecast config settings must be used after specifying the output.\n");
+				return -1;
+			}
 
 		case 31:
 			// DEVIATION
@@ -244,6 +234,7 @@ int check_args() {
 
 int main(int argc, char* argv[]) {
 	//Configure settings with reasonable defaults
+	radio_settings.enable_status = false;
 	radio_settings.deemphasis_rate = DEFAULT_DEEMPHASIS_RATE;
 	radio_settings.fm_deviation = DEFAULT_FM_DEVIATION;
 	radio_settings.bb_filter_cutoff = DEFAULT_BB_FILTER_CUTOFF;
@@ -267,7 +258,6 @@ int main(int argc, char* argv[]) {
 	radio->open(frequency);
 
 	//Initialize icecast and attach
-	printf("Connecting to Icecast...\n");
 	if (icecast_aud != 0) {
 		try {
 			icecast_aud->init();
@@ -294,6 +284,7 @@ int main(int argc, char* argv[]) {
 	radio->start();
 
 	//Loop
+	printf("Ready!\n");
 	while (1)
 		radio->work();
 
