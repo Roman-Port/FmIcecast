@@ -39,7 +39,7 @@ fmice_circular_buffer<T>::~fmice_circular_buffer() {
 }
 
 template <typename T>
-size_t fmice_circular_buffer<T>::write(T* input, size_t incoming) {
+size_t fmice_circular_buffer<T>::write(const T* input, size_t incoming) {
     //Lock
     pthread_mutex_lock(&cast_lock);
 
@@ -106,3 +106,4 @@ size_t fmice_circular_buffer<T>::read(T* output, size_t count) {
 template class fmice_circular_buffer<float>;
 template class fmice_circular_buffer<int32_t>;
 template class fmice_circular_buffer<airspyhf_complex_float_t>;
+template class fmice_circular_buffer<uint8_t>;

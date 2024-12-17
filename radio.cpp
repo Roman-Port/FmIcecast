@@ -145,6 +145,6 @@ void fmice_radio::work() {
 		int audCount = stereo_decoder.process(filter_mpx.out.writeBuf, interleaved_buffer, count);
 
 		//Send to output
-		output_audio->push((float*)interleaved_buffer, audCount * 2);
+		output_audio->push(interleaved_buffer, audCount);
 	}
 }

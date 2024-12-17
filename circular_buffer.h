@@ -15,7 +15,7 @@ public:
 	/// </summary>
 	/// <param name="input"></param>
 	/// <param name="count"></param>
-	size_t write(T* input, size_t count);
+	size_t write(const T* input, size_t count);
 
 	/// <summary>
 	/// Reads from the buffer. Thread safe. Hangs until count samples are recieved.
