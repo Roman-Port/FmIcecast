@@ -147,18 +147,36 @@ static void print_output_status(char* output, const char* name, fmice_icecast* c
 	sprintf(output, "%s=[status=%s; retries=%i]; ", name, ICECAST_STATUS_NAMES[cast->get_status()], cast->get_retries());
 }
 
+static void print_rds_status(char* output, fmice_rds* rds) {
+	//If not enabled, don't print anything
+	if (rds == NULL) {
+		output[0] = 0;
+		return;
+	}
+
+	//Fetch stats
+	fmice_rds_stats stats;
+	rds->get_stats(&stats);
+
+	//Format
+	printf("rds=[sync=%s; overruns=%i; underruns=%i]; ", stats.has_sync ? "ok" : "none", stats.overruns, stats.underruns);
+}
+
 void fmice_radio::print_status() {
 	//Format status
 	char outputMpxStatus[256];
 	print_output_status(outputMpxStatus, "mpx_icecast", output_mpx);
 	char outputAudStatus[256];
 	print_output_status(outputAudStatus, "aud_icecast", output_audio);
+	char rdsStatus[256];
+	print_rds_status(rdsStatus, rds);
 
 	//Write status
-	printf("[STATUS] radio_fifo_use=%i%% %s%s\n",
+	printf("[STATUS] radio_fifo_use=%i%% %s%s%s\n",
 		(radio_buffer->get_use() * 100) / radio_buffer->get_size(),
 		outputMpxStatus,
-		outputAudStatus
+		outputAudStatus,
+		rdsStatus
 	);
 
 	//Reset counter
