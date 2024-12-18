@@ -3,6 +3,7 @@
 #include "cast.h"
 #include "circular_buffer.h"
 #include "stereo_demod.h"
+#include "rds/rds.h"
 
 #include <libairspyhf/airspyhf.h>
 #include <dsp/filter/fir.h>
@@ -28,6 +29,10 @@ struct fmice_radio_settings_t {
 
 	double aud_filter_cutoff;
 	double aud_filter_trans;
+
+	bool rds_enable;
+	float rds_max_skew;
+	float rds_level;
 
 };
 
@@ -80,10 +85,12 @@ private:
 	dsp::tap<float> filter_mpx_taps;
 	dsp::filter::DecimatingFIR<float, float> filter_mpx;
 
+	float* mpx_out_buffer;
 	dsp::stereo_t* interleaved_buffer;
 
 	fmice_icecast* output_mpx; // May be null
 	fmice_icecast* output_audio; // May be null
+	fmice_rds* rds; // May be null
 
 	bool enable_status;
 	int samples_since_last_status;

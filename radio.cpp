@@ -14,6 +14,7 @@
 #include <dsp/math/add.h>
 #include <dsp/math/subtract.h>
 #include <dsp/convert/l_r_to_stereo.h>
+#include <math.h>
 
 #define RADIO_BUFFER_SIZE 65536
 
@@ -23,6 +24,7 @@ fmice_radio::fmice_radio(fmice_radio_settings_t settings) :
 	radio_buffer(0),
 	output_mpx(0),
 	output_audio(0),
+	rds(0),
 	samples_since_last_status(0),
 	stereo_decoder(RADIO_BUFFER_SIZE),
 	enable_status(settings.enable_status)
@@ -31,7 +33,8 @@ fmice_radio::fmice_radio(fmice_radio_settings_t settings) :
 	size_t alignment = volk_get_alignment();
 	filter_bb_buffer = (dsp::complex_t*)volk_malloc(sizeof(dsp::complex_t) * RADIO_BUFFER_SIZE, alignment);
 	interleaved_buffer = (dsp::stereo_t*)volk_malloc(sizeof(dsp::stereo_t) * RADIO_BUFFER_SIZE, alignment);
-	if (filter_bb_buffer == 0 || interleaved_buffer == 0)
+	mpx_out_buffer = (float*)volk_malloc(sizeof(float) * RADIO_BUFFER_SIZE, alignment);
+	if (filter_bb_buffer == 0 || interleaved_buffer == 0 || mpx_out_buffer == 0)
 		throw std::runtime_error("Failed to allocate buffers.");
 	radio_buffer = new fmice_circular_buffer<airspyhf_complex_float_t>(SAMP_RATE);
 
@@ -53,6 +56,10 @@ fmice_radio::fmice_radio(fmice_radio_settings_t settings) :
 
 	//Configure stereo decoder
 	stereo_decoder.init(MPX_SAMP_RATE, AUDIO_DECIM_RATE, settings.aud_filter_cutoff, settings.aud_filter_trans, settings.deemphasis_rate);
+
+	//Set up RDS if enabled (convert level from dB too)
+	if (settings.rds_enable)
+		rds = new fmice_rds(MPX_SAMP_RATE, RADIO_BUFFER_SIZE, settings.rds_max_skew, powf(10, settings.rds_level / 20));
 }
 
 fmice_radio::~fmice_radio() {
@@ -172,9 +179,17 @@ void fmice_radio::work() {
 	//Filter composite
 	count = filter_mpx.process(count, fm_demod.out.writeBuf, filter_mpx.out.writeBuf);
 
+	//Copy into the output MPX buffer - This allows us to change it without clobering the original
+	assert(count <= RADIO_BUFFER_SIZE);
+	memcpy(mpx_out_buffer, filter_mpx.out.writeBuf, sizeof(float) * count);
+
+	//Process RDS reencoding
+	if (rds != 0)
+		rds->process(filter_mpx.out.writeBuf, mpx_out_buffer, count);
+
 	//Send composite to icecast
 	if (output_mpx != 0)
-		output_mpx->push(filter_mpx.out.writeBuf, count);
+		output_mpx->push(mpx_out_buffer, count);
 
 	//Demodulate audio if there's an output for it
 	if (output_audio != 0) {
