@@ -36,6 +36,7 @@ fmice_stereo_demod::~fmice_stereo_demod() {
 void fmice_stereo_demod::init(int sampleRate, int audioDecimRate, double audioFilterCutoff, double audioFilterTrans, double deemphasisRate) {
     //Init pilot filter
     pilot_filter_taps = dsp::taps::bandPass<dsp::complex_t>(18750.0, 19250.0, 3000.0, sampleRate, true);
+    printf("Stereo Pilot taps: %i\n", pilot_filter_taps.size);
     pilotFir.init(NULL, pilot_filter_taps);
     pilotFir.out.setBufferSize(buffer_size);
 
@@ -55,6 +56,7 @@ void fmice_stereo_demod::init(int sampleRate, int audioDecimRate, double audioFi
 
     //Init audio filters
     audio_filter_taps = dsp::taps::lowPass(audioFilterCutoff, audioFilterTrans, sampleRate);
+    printf("Stereo Audio taps: %i\n", audio_filter_taps.size);
     audio_filter_l.init(NULL, audio_filter_taps, audioDecimRate);
     audio_filter_l.out.setBufferSize(buffer_size);
     audio_filter_r.init(NULL, audio_filter_taps, audioDecimRate);
@@ -100,8 +102,8 @@ int fmice_stereo_demod::process(float* mpxIn, dsp::stereo_t* audioOut, int count
     volk_32f_s32f_multiply_32f(lmr, lmr, 2.0f, count);
 
     //Do L = (L+R) + (L-R), R = (L+R) - (L-R)
-    dsp::math::Add<float>::process(count, mpxIn, lmr, l);
-    dsp::math::Subtract<float>::process(count, mpxIn, lmr, r);
+    dsp::math::Add<float>::process(count, lpr_delay.out.writeBuf, lmr, l);
+    dsp::math::Subtract<float>::process(count, lpr_delay.out.writeBuf, lmr, r);
 
     //Filter audio
     int countL = audio_filter_l.process(count, l, l);
