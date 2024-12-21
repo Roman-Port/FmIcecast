@@ -18,10 +18,8 @@
 
 #define RADIO_BUFFER_SIZE 65536
 
-fmice_radio::fmice_radio(fmice_radio_settings_t settings) :
-	radio(NULL),
-	radio_transfer_size(0),
-	radio_buffer(0),
+fmice_radio::fmice_radio(fmice_device* device, fmice_radio_settings_t settings) :
+	device(device),
 	output_mpx(0),
 	output_audio(0),
 	rds(0),
@@ -38,7 +36,6 @@ fmice_radio::fmice_radio(fmice_radio_settings_t settings) :
 	mpx_out_buffer = (float*)volk_malloc(sizeof(float) * RADIO_BUFFER_SIZE, alignment);
 	if (filter_bb_buffer == 0 || interleaved_buffer == 0 || mpx_out_buffer == 0)
 		throw std::runtime_error("Failed to allocate buffers.");
-	radio_buffer = new fmice_circular_buffer<airspyhf_complex_float_t>(SAMP_RATE);
 
 	//Create baseband filter
 	filter_bb_taps = dsp::taps::lowPass(settings.bb_filter_cutoff, settings.bb_filter_trans, SAMP_RATE);
@@ -74,61 +71,6 @@ void fmice_radio::set_mpx_output(fmice_icecast* ice) {
 
 void fmice_radio::set_audio_output(fmice_icecast* ice) {
 	output_audio = ice;
-}
-
-void fmice_radio::open(int freq) {
-	//Open
-	int result = airspyhf_open(&radio);
-	if (result) {
-		printf("Failed to open AirSpy HF device: %i.\n", result);
-		throw std::runtime_error("Failed to open AirSpy HF Device.");
-	}
-
-	//Set sample rate
-	result = airspyhf_set_samplerate(radio, SAMP_RATE);
-	if (result) {
-		printf("Failed to set device sample rate to %i (%i)!\n", SAMP_RATE, result);
-		throw std::runtime_error("Failed to set device sample rate.");
-	}
-
-	//Set frequency
-	result = airspyhf_set_freq(radio, freq);
-	if (result) {
-		printf("Failed to set device frequency to %i!\n", freq);
-		throw std::runtime_error("Failed to set device frequency.");
-	}
-
-	//Fetch the buffer size to use and do some sanity checks
-	radio_transfer_size = airspyhf_get_output_size(radio);
-	if (radio_transfer_size <= 0)
-		throw std::runtime_error("Invalid buffer size returned from device.");
-}
-
-void fmice_radio::start() {
-	//Sanity check
-	if (radio == 0)
-		throw std::runtime_error("Radio is not opened. Call open function.");
-
-	//Start
-	if (airspyhf_start(radio, airspyhf_rx_cb_static, this))
-		throw std::runtime_error("Failed to start radio.");
-}
-
-int fmice_radio::airspyhf_rx_cb_static(airspyhf_transfer_t* transfer) {
-	return ((fmice_radio*)transfer->ctx)->airspyhf_rx_cb(transfer);
-}
-
-int fmice_radio::airspyhf_rx_cb(airspyhf_transfer_t* transfer) {
-	//Warn on dropped samples
-	if (transfer->dropped_samples > 0)
-		printf("WARN: Device dropped %i samples!\n", transfer->dropped_samples);
-
-	//Push into buffer
-	size_t dropped = transfer->sample_count - radio_buffer->write(transfer->samples, transfer->sample_count);
-	if (dropped > 0)
-		printf("WARN: Processing dropped %i samples!\n", dropped);
-
-	return 0;
 }
 
 static const char* ICECAST_STATUS_NAMES[4] = {
@@ -174,8 +116,8 @@ void fmice_radio::print_status() {
 	print_rds_status(rdsStatus, rds);
 
 	//Write status
-	printf("[STATUS] radio_fifo_use=%i%% %s%s%s\n",
-		(radio_buffer->get_use() * 100) / radio_buffer->get_size(),
+	printf("[STATUS] dropped_samples=%i %s%s%s\n",
+		device->get_dropped_samples(),
 		outputMpxStatus,
 		outputAudStatus,
 		rdsStatus
@@ -187,7 +129,7 @@ void fmice_radio::print_status() {
 
 void fmice_radio::work() {
 	//Read into buffer
-	int count = radio_buffer->read((airspyhf_complex_float_t*)filter_bb_buffer, RADIO_BUFFER_SIZE);
+	int count = device->read(filter_bb_buffer, RADIO_BUFFER_SIZE);
 	samples_since_last_status += count;
 
 	//Filter baseband

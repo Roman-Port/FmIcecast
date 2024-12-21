@@ -1,12 +1,12 @@
 #pragma once
 
 #include "cast.h"
+#include "device.h"
 #include "circular_buffer.h"
 #include "stereo_demod.h"
 #include "stereo_encode.h"
 #include "rds/rds.h"
 
-#include <libairspyhf/airspyhf.h>
 #include <dsp/filter/fir.h>
 #include <dsp/filter/decimating_fir.h>
 #include <dsp/demod/quadrature.h>
@@ -43,7 +43,7 @@ struct fmice_radio_settings_t {
 class fmice_radio {
 
 public:
-	fmice_radio(fmice_radio_settings_t settings);
+	fmice_radio(fmice_device* device, fmice_radio_settings_t settings);
 	~fmice_radio();
 
 	/// <summary>
@@ -59,25 +59,12 @@ public:
 	void set_audio_output(fmice_icecast* ice);
 
 	/// <summary>
-	/// Opens the radio.
-	/// </summary>
-	void open(int freq);
-
-	/// <summary>
-	/// Starts radio RX.
-	/// </summary>
-	void start();
-
-	/// <summary>
 	/// Processes a block of smaples. Call this over and over.
 	/// </summary>
 	void work();
 
 private:
-	airspyhf_device_t* radio;
-	int radio_transfer_size;
-
-	fmice_circular_buffer<airspyhf_complex_float_t>* radio_buffer;
+	fmice_device* device;
 
 	dsp::tap<float> filter_bb_taps;
 	dsp::filter::FIR<dsp::complex_t, float> filter_bb;
@@ -100,9 +87,6 @@ private:
 	bool enable_status;
 	int samples_since_last_status;
 	bool enable_stereo_generator;
-
-	static int airspyhf_rx_cb_static(airspyhf_transfer_t* transfer);
-	int airspyhf_rx_cb(airspyhf_transfer_t* transfer);
 
 	void print_status();
 

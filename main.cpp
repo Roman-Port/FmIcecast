@@ -3,6 +3,7 @@
 #include "cast.h"
 #include "radio.h"
 #include "codecs/codec_flac.h"
+#include "devices/device_airspyhf.h"
 
 #include <getopt.h>
 
@@ -293,8 +294,11 @@ int main(int argc, char* argv[]) {
 
 	//Open radio
 	printf("Opening AirSpy HF+ Device (on %i kHz)...\n", frequency / 1000);
-	fmice_radio* radio = new fmice_radio(radio_settings);
-	radio->open(frequency);
+	fmice_device_airspyhf airspy(SAMP_RATE);
+	airspy.open(frequency);
+
+	//Set up radio
+	fmice_radio radio(&airspy, radio_settings);
 
 	//Initialize icecast and attach
 	if (icecast_aud != 0) {
@@ -305,7 +309,7 @@ int main(int argc, char* argv[]) {
 			printf("Error: Failed to initialize audio icecast: %s\n", ex->what());
 			return -1;
 		}
-		radio->set_audio_output(icecast_aud);
+		radio.set_audio_output(icecast_aud);
 	}
 	if (icecast_mpx != 0) {
 		try {
@@ -315,17 +319,17 @@ int main(int argc, char* argv[]) {
 			printf("Error: Failed to initialize composite icecast: %s\n", ex->what());
 			return -1;
 		}
-		radio->set_mpx_output(icecast_mpx);
+		radio.set_mpx_output(icecast_mpx);
 	}
 
 	//Start the radio
 	printf("Starting radio...\n");
-	radio->start();
+	airspy.start();
 
 	//Loop
-	printf("Ready!\n");
+	printf("Running...\n");
 	while (1)
-		radio->work();
+		radio.work();
 
 	//Done
 	printf("Exiting...\n");
