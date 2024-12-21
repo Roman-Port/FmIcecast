@@ -105,6 +105,8 @@ bool fmice_codec_flac::submit_buffer() {
 
     //Process with FLAC
     bool success = FLAC__stream_encoder_process_interleaved(flac, input_buffer, input_buffer_samples);
+    if (!success)
+        printf("[CODEC-FLAC] WARN: FLAC encoder returned error code.\n");
 
     //Reset state
     input_buffer_use = 0;

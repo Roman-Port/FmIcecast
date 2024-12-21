@@ -16,12 +16,14 @@ public:
 	void init(int sampleRate, int audioDecimRate, double audioFilterCutoff, double audioFilterTrans, double deemphasisRate);
     int process(float* mpxIn, dsp::stereo_t* audioOut, int count);
 
+    float* lmr; // L-R buffer at input sample rate, used for re-encoding stereo
+    float* lpr; // L+R buffer at input sample rate, used for re-encoding stereo
+
 private:
     int buffer_size;
 
     float* l;
     float* r;
-    float* lmr;
 
     dsp::tap<dsp::complex_t> pilot_filter_taps;
     dsp::filter::FIR<dsp::complex_t, dsp::complex_t> pilotFir;

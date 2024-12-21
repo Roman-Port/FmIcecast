@@ -3,6 +3,7 @@
 #include "cast.h"
 #include "circular_buffer.h"
 #include "stereo_demod.h"
+#include "stereo_encode.h"
 #include "rds/rds.h"
 
 #include <libairspyhf/airspyhf.h>
@@ -33,6 +34,9 @@ struct fmice_radio_settings_t {
 	bool rds_enable;
 	float rds_max_skew;
 	float rds_level;
+
+	bool stereo_generator_enable;
+	float stereo_generator_level;
 
 };
 
@@ -81,6 +85,7 @@ private:
 
 	dsp::demod::Quadrature fm_demod;
 	fmice_stereo_demod stereo_decoder;
+	fmice_stereo_encode stereo_encoder;
 
 	dsp::tap<float> filter_mpx_taps;
 	dsp::filter::DecimatingFIR<float, float> filter_mpx;
@@ -94,6 +99,7 @@ private:
 
 	bool enable_status;
 	int samples_since_last_status;
+	bool enable_stereo_generator;
 
 	static int airspyhf_rx_cb_static(airspyhf_transfer_t* transfer);
 	int airspyhf_rx_cb(airspyhf_transfer_t* transfer);

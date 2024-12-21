@@ -6,7 +6,7 @@
 
 #define RDS_SAMPLE_RATE 190000 // Must be a multiple of the baud rate and greater than the mpx sample rate
 
-fmice_rds::fmice_rds(int sampleRate, int bufferSize, float maxSkewSeconds, float scale) :
+fmice_rds::fmice_rds(int inputSampleRate, int outputSampleRate, int bufferSize, float maxSkewSeconds, float scale) :
 	dec(bufferSize),
 	enc(RDS_SAMPLE_RATE),
 	scale(scale),
@@ -28,7 +28,7 @@ fmice_rds::fmice_rds(int sampleRate, int bufferSize, float maxSkewSeconds, float
 	osc_phase_inc(0)
 {
 	//Configure decoder
-	dec.configure(sampleRate);
+	dec.configure(inputSampleRate);
 
 	//Calculate bit buffer size from the skew and baud rate
 	bit_buffer_len = (int)(1187.5 * maxSkewSeconds);
@@ -47,13 +47,13 @@ fmice_rds::fmice_rds(int sampleRate, int bufferSize, float maxSkewSeconds, float
 	assert(encoder_buffer != 0);
 
 	//Init MPX filter...this is a very tight filter so prepare for a lot of taps!
-	mpx_filter_taps = dsp::taps::lowPass(38000 + 17200, 500, sampleRate);
+	mpx_filter_taps = dsp::taps::lowPass(38000 + 17200, 500, outputSampleRate);
 	printf("rds re-encode mpx taps: %i\n", mpx_filter_taps.size);
 	mpx_filter.init(NULL, mpx_filter_taps);
 
 	//Init resampler that takes it from the RDS rate to the output rate
-	assert(RDS_SAMPLE_RATE >= sampleRate);
-	rds_resamp.init(NULL, RDS_SAMPLE_RATE, sampleRate);
+	assert(RDS_SAMPLE_RATE >= outputSampleRate);
+	rds_resamp.init(NULL, RDS_SAMPLE_RATE, outputSampleRate);
 	rds_resamp.out.setBufferSize(bufferSize);
 
 	//Allocate RDS buffer
@@ -63,7 +63,7 @@ fmice_rds::fmice_rds(int sampleRate, int bufferSize, float maxSkewSeconds, float
 
 	//Calculate parameters for 57 kHz oscilator
 	osc_phase = 0;
-	osc_phase_inc = 2 * M_PI * 57000 / sampleRate;
+	osc_phase_inc = 2 * M_PI * 57000 / outputSampleRate;
 
 	//Init mutex for stats
 	bool mutexOk = pthread_mutex_init(&stat_lock, NULL) == 0;
@@ -110,15 +110,18 @@ void fmice_rds::update_stats(int addUnderrun, int addOverrun) {
 	pthread_mutex_unlock(&stat_lock);
 }
 
-void fmice_rds::process(const float* mpxIn, float* mpxOut, int count) {
+void fmice_rds::push_in(const float* mpxIn, int count) {
 	//Push into decoder
 	int decodedBits = dec.process(mpxIn, decoder_buffer, count);
 
-	//Filter composite to remove old RDS
-	mpx_filter.process(count, mpxIn, mpxOut);
-
 	//Push decoded bits into the bit buffer
 	bit_buffer_push(decoder_buffer, decodedBits);
+}
+
+void fmice_rds::process(const float* mpxIn, float* mpxOut, int count, bool filter) {
+	//Filter composite to remove old RDS
+	if (filter)
+		mpx_filter.process(count, mpxIn, mpxOut);
 
 	//Begin encoder stage to fill up mpxOut with RDS samples
 	int encCount = 0;

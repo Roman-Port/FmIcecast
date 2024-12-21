@@ -16,6 +16,7 @@
 #define DEFAULT_AUD_FILTER_TRANS 4000
 #define DEFAULT_RDS_BUFFER 1
 #define DEFAULT_RDS_LEVEL -10
+#define DEFAULT_STEREO_PILOT_LEVEL -30
 
 static int frequency = 0;
 static fmice_icecast* icecast_mpx = 0;
@@ -48,6 +49,8 @@ void help(char* pgm) {
 	printf("        [--rds]\n");
 	printf("        [--rds-level RDS Level in dB (default is %i dB)]\n", DEFAULT_RDS_LEVEL);
 	printf("        [--rds-buffer RDS maximum skew in seconds (default is %is)]\n", DEFAULT_RDS_BUFFER);
+	printf("    Other Features:\n");
+	printf("        [--stereo-gen The stereo pilot level (default is %i dB)]\n", DEFAULT_STEREO_PILOT_LEVEL);
 	printf("    Advanced Settings:\n");
 	printf("        [--deviation FM deviation (default is %i)]\n", DEFAULT_FM_DEVIATION);
 	printf("        [--deemphasis FM deemphasis rate (default is %i - Set to 0 to disable)]\n", DEFAULT_DEEMPHASIS_RATE);
@@ -86,8 +89,9 @@ int parse_args(int argc, char* argv[]) {
 		{ "aud-filter-trans", required_argument, NULL, 38 },
 		{ "freq", required_argument, NULL, 'f'},
 		{ "rds", no_argument, NULL, 15 },
-		{ "rds-level", no_argument, NULL, 16 },
-		{ "rds-buffer", no_argument, NULL, 17 },
+		{ "rds-level", required_argument, NULL, 16 },
+		{ "rds-buffer", required_argument, NULL, 17 },
+		{ "stereo-gen", required_argument, NULL, 18 },
 		{ 0 }
 	};
 
@@ -210,6 +214,12 @@ int parse_args(int argc, char* argv[]) {
 			radio_settings.rds_max_skew = atoi(optarg);
 			break;
 
+		case 18:
+			// STEREO GENERATOR
+			radio_settings.stereo_generator_enable = true;
+			radio_settings.stereo_generator_level = atoi(optarg);
+			break;
+
 		default:
 			help(argv[0]);
 			return -1;
@@ -270,6 +280,8 @@ int main(int argc, char* argv[]) {
 	radio_settings.rds_enable = false;
 	radio_settings.rds_level = DEFAULT_RDS_LEVEL;
 	radio_settings.rds_max_skew = DEFAULT_RDS_BUFFER;
+	radio_settings.stereo_generator_enable = false;
+	radio_settings.stereo_generator_level = DEFAULT_STEREO_PILOT_LEVEL;
 
 	//Parse command line args
 	if (parse_args(argc, argv))

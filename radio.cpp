@@ -27,7 +27,9 @@ fmice_radio::fmice_radio(fmice_radio_settings_t settings) :
 	rds(0),
 	samples_since_last_status(0),
 	stereo_decoder(RADIO_BUFFER_SIZE),
-	enable_status(settings.enable_status)
+	stereo_encoder(RADIO_BUFFER_SIZE, powf(10, settings.stereo_generator_level / 20), MPX_SAMP_RATE, settings.aud_filter_cutoff, settings.aud_filter_trans),
+	enable_status(settings.enable_status),
+	enable_stereo_generator(settings.stereo_generator_enable)
 {
 	//Allocate buffers
 	size_t alignment = volk_get_alignment();
@@ -59,7 +61,7 @@ fmice_radio::fmice_radio(fmice_radio_settings_t settings) :
 
 	//Set up RDS if enabled (convert level from dB too)
 	if (settings.rds_enable)
-		rds = new fmice_rds(MPX_SAMP_RATE, RADIO_BUFFER_SIZE, settings.rds_max_skew, powf(10, settings.rds_level / 20));
+		rds = new fmice_rds(SAMP_RATE, MPX_SAMP_RATE, RADIO_BUFFER_SIZE, settings.rds_max_skew, powf(10, settings.rds_level / 20));
 }
 
 fmice_radio::~fmice_radio() {
@@ -159,7 +161,7 @@ static void print_rds_status(char* output, fmice_rds* rds) {
 	rds->get_stats(&stats);
 
 	//Format
-	printf("rds=[sync=%s; overruns=%i; underruns=%i]; ", stats.has_sync ? "ok" : "none", stats.overruns, stats.underruns);
+	sprintf(output, "rds=[sync=%s; overruns=%i; underruns=%i]; ", stats.has_sync ? "ok" : "none", stats.overruns, stats.underruns);
 }
 
 void fmice_radio::print_status() {
@@ -194,6 +196,10 @@ void fmice_radio::work() {
 	//Demodulate FM
 	count = fm_demod.process(count, filter_bb.out.writeBuf, fm_demod.out.writeBuf);
 
+	//Use composite to decode RDS -- Allows composite filter to be wider
+	if (rds != 0)
+		rds->push_in(fm_demod.out.writeBuf, count);
+
 	//Filter composite
 	count = filter_mpx.process(count, fm_demod.out.writeBuf, filter_mpx.out.writeBuf);
 
@@ -201,22 +207,29 @@ void fmice_radio::work() {
 	assert(count <= RADIO_BUFFER_SIZE);
 	memcpy(mpx_out_buffer, filter_mpx.out.writeBuf, sizeof(float) * count);
 
-	//Process RDS reencoding
-	if (rds != 0)
-		rds->process(filter_mpx.out.writeBuf, mpx_out_buffer, count);
-
-	//Send composite to icecast
-	if (output_mpx != 0)
-		output_mpx->push(mpx_out_buffer, count);
-
-	//Demodulate audio if there's an output for it
-	if (output_audio != 0) {
+	//Demodulate audio if there's an output for it or we're re-generating stereo
+	if (output_audio != 0 || enable_stereo_generator) {
 		//Process stereo
 		int audCount = stereo_decoder.process(filter_mpx.out.writeBuf, interleaved_buffer, count);
 
 		//Send to output
-		output_audio->push(interleaved_buffer, audCount);
+		if (output_audio != 0)
+			output_audio->push(interleaved_buffer, audCount);
 	}
+
+	//Encode stereo (this wipes out the MPX)
+	if (enable_stereo_generator) {
+		stereo_encoder.process(mpx_out_buffer, stereo_decoder.lpr, stereo_decoder.lmr, count);
+		volk_32f_s32f_multiply_32f(mpx_out_buffer, mpx_out_buffer, 0.5f, count);
+	}
+
+	//Process RDS reencoding
+	if (rds != 0)
+		rds->process(mpx_out_buffer, mpx_out_buffer, count, false);
+
+	//Send composite to icecast
+	if (output_mpx != 0)
+		output_mpx->push(mpx_out_buffer, count);
 
 	//Write status once every second
 	if (enable_status && samples_since_last_status >= SAMP_RATE)

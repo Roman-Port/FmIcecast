@@ -11,18 +11,23 @@
 
 // Very inspired by SDR++ FM demodulator
 
-fmice_stereo_demod::fmice_stereo_demod(int bufferSize) {
-    //Set
-    this->buffer_size = bufferSize;
-
+fmice_stereo_demod::fmice_stereo_demod(int bufferSize) :
+    buffer_size(bufferSize),
+    l(0),
+    r(0),
+    lmr(0),
+    lpr(0)
+{
     //Allocate buffers
     l = (float*)volk_malloc(sizeof(float) * bufferSize, volk_get_alignment());
     r = (float*)volk_malloc(sizeof(float) * bufferSize, volk_get_alignment());
+    lpr = (float*)volk_malloc(sizeof(float) * bufferSize, volk_get_alignment());
     lmr = (float*)volk_malloc(sizeof(float) * bufferSize, volk_get_alignment());
 
     //Validate
     assert(l != NULL);
     assert(r != NULL);
+    assert(lpr != NULL);
     assert(lmr != NULL);
 }
 
@@ -87,7 +92,7 @@ int fmice_stereo_demod::process(float* mpxIn, dsp::stereo_t* audioOut, int count
     pilot_pll.process(count, pilotFir.out.writeBuf, pilot_pll.out.writeBuf);
 
     //Delay to keep in phase
-    lpr_delay.process(count, mpxIn, mpxIn);
+    lpr_delay.process(count, mpxIn, lpr_delay.out.writeBuf);
     lmr_delay.process(count, rtoc.out.writeBuf, lmr_delay.out.writeBuf);
 
     //Conjugate PLL output to down convert twice the L-R signal
@@ -100,6 +105,9 @@ int fmice_stereo_demod::process(float* mpxIn, dsp::stereo_t* audioOut, int count
 
     //Amplify by 2x
     volk_32f_s32f_multiply_32f(lmr, lmr, 2.0f, count);
+
+    //Copy L+R for external use
+    memcpy(lpr, lpr_delay.out.writeBuf, sizeof(float) * count);
 
     //Do L = (L+R) + (L-R), R = (L+R) - (L-R)
     dsp::math::Add<float>::process(count, lpr_delay.out.writeBuf, lmr, l);

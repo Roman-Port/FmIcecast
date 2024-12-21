@@ -19,13 +19,18 @@ struct fmice_rds_stats {
 class fmice_rds {
 
 public:
-	fmice_rds(int sampleRate, int bufferSize, float maxSkewSeconds, float scale);
+	fmice_rds(int inputSampleRate, int outputSampleRate, int bufferSize, float maxSkewSeconds, float scale);
 	~fmice_rds();
+
+	/// <summary>
+	/// Reads RDS from the input.
+	/// </summary>
+	void push_in(const float* mpxIn, int count);
 
 	/// <summary>
 	/// Processes mpxIn into mpxOut, reencoding RDS.
 	/// </summary>
-	void process(const float* mpxIn, float* mpxOut, int count);
+	void process(const float* mpxIn, float* mpxOut, int count, bool filter);
 
 	/// <summary>
 	/// Reads stats and copies them into the struct being pointed to. Thread safe.

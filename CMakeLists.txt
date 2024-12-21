@@ -23,7 +23,7 @@ pkg_check_modules(flac REQUIRED IMPORTED_TARGET flac)
 add_subdirectory(dsp)
 
 # Add main
-add_executable (fmice "main.cpp" "radio.cpp" "stereo_demod.cpp" "cast.cpp" "circular_buffer.cpp" "codec.cpp" "codecs/codec_flac.cpp" "rds/rds.cpp" "rds/rds_dec.cpp" "rds/rds_enc.cpp")
+add_executable (fmice "main.cpp" "radio.cpp" "stereo_demod.cpp" "cast.cpp" "circular_buffer.cpp" "codec.cpp" "codecs/codec_flac.cpp" "rds/rds.cpp" "rds/rds_dec.cpp" "rds/rds_enc.cpp" "stereo_encode.cpp" "stereo_encode.h")
 #add_executable (fmice "rds/rds_test.cpp" "rds/rds.cpp" "rds/rds_dec.cpp" "rds/rds_enc.cpp" "rds/rds_enc.h")
 
 # Link
