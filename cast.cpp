@@ -162,7 +162,7 @@ void fmice_icecast::work() {
         shout_set_password(shout, icecast_password);
         shout_set_mount(shout, icecast_mount);
         shout_set_user(shout, icecast_username);
-        shout_set_content_format(shout, SHOUT_FORMAT_OGG, SHOUT_USAGE_UNKNOWN, NULL);
+        codec->configure_shout(shout); // Sets content type
         pthread_mutex_unlock(&mutex);
 
         //Connect
@@ -177,13 +177,13 @@ void fmice_icecast::work() {
 
                 //Send
                 if (shout_send(shout, workingBuffer, read) != SHOUTERR_SUCCESS) {
-                    //printf("[CAST] Failed to send packet to Icecast.\n");
+                    printf("[CAST] Failed to send packet to Icecast.\n");
                     break;
                 }
 
                 //Check error flag
                 if (codec->has_error()) {
-                    //printf("[CAST] Codec encountered an error. Disconnecting...\n");
+                    printf("[CAST] Codec encountered an error. Disconnecting...\n");
                     break;
                 }
             }

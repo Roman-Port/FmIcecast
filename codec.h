@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <dsp/types.h>
+#include <shout/shout.h>
 
 #include "circular_buffer.h"
 
@@ -48,6 +49,11 @@ public:
 	/// </summary>
 	/// <returns></returns>
 	bool has_error();
+
+	/// <summary>
+	/// Sets up metadata for shoutcast, typically the content type.
+	/// </summary>
+	virtual void configure_shout(shout_t* ice) = 0;
 
 protected:
 	int sample_rate;

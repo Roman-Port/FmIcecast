@@ -9,6 +9,8 @@ public:
 	fmice_codec_flac(int sampleRate, int channels, int blockSize = 65536);
 	~fmice_codec_flac();
 
+	void configure_shout(shout_t* ice) override;
+
 protected:
 	void reset_safe() override;
 	bool write_safe(float* samples, int count) override;

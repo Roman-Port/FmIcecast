@@ -18,13 +18,14 @@ find_package(Threads REQUIRED)
 pkg_check_modules(libairspyhf REQUIRED IMPORTED_TARGET libairspyhf)
 pkg_check_modules(shout REQUIRED IMPORTED_TARGET shout)
 pkg_check_modules(flac REQUIRED IMPORTED_TARGET flac)
+pkg_check_modules(lame REQUIRED IMPORTED_TARGET lame)
 
 # Add SDR++ DSP
 add_subdirectory(dsp)
 
 # Add main
-add_library (fmice-core STATIC "radio.cpp" "stereo_demod.cpp" "cast.cpp" "circular_buffer.cpp" "codec.cpp" "codecs/codec_flac.cpp" "rds/rds.cpp" "rds/rds_dec.cpp" "rds/rds_enc.cpp" "stereo_encode.cpp" "stereo_encode.h" "device.h" "devices/device_airspyhf.cpp")
-target_link_libraries(fmice-core Volk::volk airspyhf shout FLAC Threads::Threads sdrpp_dsp)
+add_library (fmice-core STATIC "radio.cpp" "stereo_demod.cpp" "cast.cpp" "circular_buffer.cpp" "codec.cpp" "codecs/codec_flac.cpp" "codecs/codec_mp3.cpp" "rds/rds.cpp" "rds/rds_dec.cpp" "rds/rds_enc.cpp" "stereo_encode.cpp" "stereo_encode.h" "device.h" "devices/device_airspyhf.cpp")
+target_link_libraries(fmice-core Volk::volk airspyhf shout FLAC Threads::Threads sdrpp_dsp mp3lame)
 
 # Add executables
 add_executable (fmice "main.cpp")

@@ -28,6 +28,11 @@ fmice_codec_flac::~fmice_codec_flac() {
     }
 }
 
+void fmice_codec_flac::configure_shout(shout_t* ice) {
+    //Set the content type
+    shout_set_content_format(ice, SHOUT_FORMAT_OGG, SHOUT_USAGE_UNKNOWN, NULL);
+}
+
 void fmice_codec_flac::create_flac() {
     //Allocate FLAC
     flac = FLAC__stream_encoder_new();

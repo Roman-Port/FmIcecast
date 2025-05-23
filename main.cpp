@@ -3,6 +3,7 @@
 #include "cast.h"
 #include "radio.h"
 #include "codecs/codec_flac.h"
+#include "codecs/codec_mp3.h"
 #include "devices/device_airspyhf.h"
 
 #include <getopt.h>
@@ -68,8 +69,10 @@ static fmice_icecast* create_icecast(const char* codecName, int channels, int sa
 	fmice_codec* codec;
 	if (strcmp(codecName, "flac") == 0)
 		codec = new fmice_codec_flac(sampRate, channels);
+	else if (strcmp(codecName, "mp3") == 0)
+		codec = new fmice_codec_mp3(sampRate, channels);
 	else {
-		printf("Unknown codec \"%s\". Options are: flac.\n", codecName);
+		printf("Unknown codec \"%s\". Options are: flac, mp3.\n", codecName);
 		return 0;
 	}
 
