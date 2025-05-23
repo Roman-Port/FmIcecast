@@ -19,6 +19,8 @@ public:
     float* lmr; // L-R buffer at input sample rate, used for re-encoding stereo
     float* lpr; // L+R buffer at input sample rate, used for re-encoding stereo
 
+    int delay_samples;
+
 private:
     int buffer_size;
 

@@ -16,7 +16,8 @@ fmice_stereo_demod::fmice_stereo_demod(int bufferSize) :
     l(0),
     r(0),
     lmr(0),
-    lpr(0)
+    lpr(0),
+    delay_samples(0)
 {
     //Allocate buffers
     l = (float*)volk_malloc(sizeof(float) * bufferSize, volk_get_alignment());
@@ -54,9 +55,10 @@ void fmice_stereo_demod::init(int sampleRate, int audioDecimRate, double audioFi
     pilot_pll.out.setBufferSize(buffer_size);
 
     //Init delays for the pilot filter
-    lpr_delay.init(NULL, ((pilot_filter_taps.size - 1) / 2) + 1);
+    delay_samples = ((pilot_filter_taps.size - 1) / 2) + 1;
+    lpr_delay.init(NULL, delay_samples);
     lpr_delay.out.setBufferSize(buffer_size);
-    lmr_delay.init(NULL, ((pilot_filter_taps.size - 1) / 2) + 1);
+    lmr_delay.init(NULL, delay_samples);
     lmr_delay.out.setBufferSize(buffer_size);
 
     //Init audio filters
@@ -109,23 +111,26 @@ int fmice_stereo_demod::process(float* mpxIn, dsp::stereo_t* audioOut, int count
     //Copy L+R for external use
     memcpy(lpr, lpr_delay.out.writeBuf, sizeof(float) * count);
 
-    //Do L = (L+R) + (L-R), R = (L+R) - (L-R)
-    dsp::math::Add<float>::process(count, lpr_delay.out.writeBuf, lmr, l);
-    dsp::math::Subtract<float>::process(count, lpr_delay.out.writeBuf, lmr, r);
+    //Do the rest only if there is an output
+    if (audioOut != 0) {
+        //Do L = (L+R) + (L-R), R = (L+R) - (L-R)
+        dsp::math::Add<float>::process(count, lpr_delay.out.writeBuf, lmr, l);
+        dsp::math::Subtract<float>::process(count, lpr_delay.out.writeBuf, lmr, r);
 
-    //Filter audio
-    int countL = audio_filter_l.process(count, l, l);
-    count = audio_filter_r.process(count, r, r);
-    assert(countL == count);
+        //Filter audio
+        int countL = audio_filter_l.process(count, l, l);
+        count = audio_filter_r.process(count, r, r);
+        assert(countL == count);
 
-    //Apply deemphesis
-    if (deemphasis_alpha != 0) {
-        process_deemphasis(deemphasis_alpha, &deemphasis_state_l, l, count);
-        process_deemphasis(deemphasis_alpha, &deemphasis_state_r, r, count);
+        //Apply deemphesis
+        if (deemphasis_alpha != 0) {
+            process_deemphasis(deemphasis_alpha, &deemphasis_state_l, l, count);
+            process_deemphasis(deemphasis_alpha, &deemphasis_state_r, r, count);
+        }
+
+        //Interleave into stereo
+        dsp::convert::LRToStereo::process(count, l, r, audioOut);
     }
-
-    //Interleave into stereo
-    dsp::convert::LRToStereo::process(count, l, r, audioOut);
 
     return count;
 }

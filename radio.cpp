@@ -167,7 +167,7 @@ void fmice_radio::work() {
 
 	//Process RDS reencoding
 	if (rds != 0)
-		rds->process(mpx_out_buffer, mpx_out_buffer, count, false);
+		rds->process(mpx_out_buffer, mpx_out_buffer, count, !enable_stereo_generator);
 
 	//Send composite to icecast
 	if (output_mpx != 0)
