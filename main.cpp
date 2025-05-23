@@ -75,8 +75,7 @@ static fmice_icecast* create_icecast(const char* codecName, int channels, int sa
 		printf("Unknown codec \"%s\". Options are: flac, mp3.\n", codecName);
 		return 0;
 	}
-
-	return new fmice_icecast(2, AUDIO_SAMP_RATE, codec);
+	return new fmice_icecast(channels, AUDIO_SAMP_RATE, codec);
 }
 
 int parse_args(int argc, char* argv[]) {

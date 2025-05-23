@@ -6,14 +6,12 @@
 class fmice_codec_mp3 : public fmice_codec {
 
 public:
-	fmice_codec_mp3(int sampleRate, int channels, int blockSize = 65536);
+	fmice_codec_mp3(int sampleRate, int channels);
 	~fmice_codec_mp3();
 
+	void reset() override;
+	void process(float* samples, int count) override;
 	void configure_shout(shout_t* ice) override;
-
-protected:
-	void reset_safe() override;
-	bool write_safe(float* samples, int count) override;
 
 private:
 	lame_global_flags* gfp;

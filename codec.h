@@ -4,7 +4,10 @@
 #include <dsp/types.h>
 #include <shout/shout.h>
 
-#include "circular_buffer.h"
+/// <summary>
+/// Callback function for the encoder. Count specifies the number of bytes, which may be 0. If LESS THAN ZERO, identifies an error.
+/// </summary>
+typedef void(*fmice_codec_callback)(const uint8_t* data, int count, void* callbackClientData);
 
 /// <summary>
 /// The base class for an audio codec (like FLAC)
@@ -16,72 +19,49 @@ public:
 	~fmice_codec();
 
 	/// <summary>
-	/// Re-initializes the codec and clears out the output buffer.
+	/// Re-initializes the codec and clears out the output buffer. Called from icecast thread.
 	/// </summary>
-	void reset();
+	virtual void reset() = 0;
 
 	/// <summary>
-	/// Writes samples to be encoded.
+	/// Processes incoming data and calls back on the same thread. Called from icecast thread.
 	/// </summary>
-	/// <param name="samples">Samples to be encoded.</param>
-	/// <param name="count">Number of samples PER CHANNEL.</param>
-	/// <returns></returns>
-	void write(float* samples, int count);
-
-	/// <summary>
-	/// Writes samples to be encoded.
-	/// </summary>
-	/// <param name="samples">Samples to be encoded.</param>
-	/// <param name="count">Number of samples PER CHANNEL.</param>
-	/// <returns></returns>
-	void write(dsp::stereo_t* samples, int count);
-
-	/// <summary>
-	/// Reads ENCODED samples to be sent on wire. Waits until count are available.
-	/// </summary>
-	/// <param name="output">Output buffer for bytes.</param>
-	/// <param name="count">Number of bytes to read.</param>
-	/// <returns></returns>
-	int read(uint8_t* output, int count);
-
-	/// <summary>
-	/// Checks if the error flag is set. Thread safe.
-	/// </summary>
-	/// <returns></returns>
-	bool has_error();
+	/// <param name="samples">PCM samples in -1 to 1 format to process. OK to modify.</param>
+	/// <param name="count">Number of input samples total.</param>
+	/// <param name="callback">Callback to fire on emitted samples. MUST be on the calling thread.</param>
+	/// <param name="callbackClientData">User-supplied data returned on the callback.</param>
+	virtual void process(float* samples, int count) = 0;
 
 	/// <summary>
 	/// Sets up metadata for shoutcast, typically the content type.
 	/// </summary>
 	virtual void configure_shout(shout_t* ice) = 0;
 
+	/// <summary>
+	/// Sets up the callback for process. Callback will be called from the same thread calling process (or possibly resetting the codec).
+	/// </summary>
+	/// <param name="callback"></param>
+	/// <param name="callbackClientData"></param>
+	void set_callback(fmice_codec_callback callback, void* callbackClientData);
+
 protected:
 	int sample_rate;
 	int channels;
 
 	/// <summary>
-	/// Re-initializes the codec and clears out the output buffer. Thread safe.
+	/// Pushes data out the callback.
 	/// </summary>
-	virtual void reset_safe();
-
-	/// <summary>
-	/// Internal write function that is called while the mutex is locked. Thread safe. Returns true on success, otherwise false.
-	/// </summary>
-	/// <param name="samples">Samples to be encoded.</param>
-	/// <param name="count">Number of samples PER CHANNEL.</param>
-	virtual bool write_safe(float* samples, int count) = 0;
-
-	/// <summary>
-	/// Pushes processed bytes to a circular buffer to be sent on wire.
-	/// </summary>
-	/// <param name="output"></param>
+	/// <param name="data"></param>
 	/// <param name="count"></param>
-	/// <returns></returns>
-	void push_out(const uint8_t* output, int count);
+	void push_out(const uint8_t* data, int count);
+
+	/// <summary>
+	/// Signals to callback that there was an error.
+	/// </summary>
+	void signal_error();
 
 private:
-	pthread_mutex_t mutex;
-	fmice_circular_buffer<uint8_t> output_buffer;
-	bool error_flag;
+	fmice_codec_callback callback;
+	void* callback_ctx;
 
 };

@@ -7,6 +7,9 @@
 #define MPX_SAMP_RATE (SAMP_RATE / DECIM_RATE)
 #define AUDIO_SAMP_RATE (MPX_SAMP_RATE / AUDIO_DECIM_RATE)
 
+#define FMICE_BLOCK_SIZE 32768 /* Block size going to encoder */
+#define FMICE_BLOCK_COUNT 8
+
 #include "volk/volk.h"
 
 #endif

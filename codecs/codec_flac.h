@@ -6,19 +6,16 @@
 class fmice_codec_flac : public fmice_codec {
 	
 public:
-	fmice_codec_flac(int sampleRate, int channels, int blockSize = 65536);
+	fmice_codec_flac(int sampleRate, int channels);
 	~fmice_codec_flac();
 
+	void reset() override;
+	void process(float* samples, int count) override;
 	void configure_shout(shout_t* ice) override;
-
-protected:
-	void reset_safe() override;
-	bool write_safe(float* samples, int count) override;
 
 private:
 	FLAC__StreamEncoder* flac;
 
-	int input_buffer_samples; // Number of samples PER CHANNEL in the input buffer
 	int32_t* input_buffer; // Length is input_buffer_samples * channels
 	int input_buffer_use; // Number of samples in the buffer PER CHANNEL
 

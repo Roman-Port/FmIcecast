@@ -3,18 +3,15 @@
 #include <volk/volk.h>
 #include <stdexcept>
 #include <cassert>
+#include "../defines.h"
 
-fmice_codec_flac::fmice_codec_flac(int sampleRate, int channels, int blockSize) : fmice_codec(sampleRate, channels) {
-    //Set
-    this->input_buffer_samples = blockSize;
+#define input_buffer_samples FMICE_BLOCK_SIZE
 
+fmice_codec_flac::fmice_codec_flac(int sampleRate, int channels) : fmice_codec(sampleRate, channels) {
     //Allocate the input buffer
-    input_buffer = (int32_t*)malloc(sizeof(int32_t) * blockSize * channels);
+    input_buffer = (int32_t*)malloc(sizeof(int32_t) * FMICE_BLOCK_SIZE * channels);
     if (input_buffer == NULL)
         throw new std::runtime_error("Failed to allocate input buffer.");
-
-    //Initialize FLAC
-    create_flac();
 }
 
 fmice_codec_flac::~fmice_codec_flac() {
@@ -52,21 +49,11 @@ void fmice_codec_flac::create_flac() {
         throw new std::runtime_error("Failed to init FLAC stream.");
 }
 
-void fmice_codec_flac::reset_safe() {
-    //Destroy stream encoder
-    if (flac != NULL) {
-        FLAC__stream_encoder_delete(flac);
-        flac = NULL;
-    }
+void fmice_codec_flac::process(float* samples, int count) {
+    //Sanity check
+    assert(flac != NULL);
 
-    //Reset base class
-    fmice_codec::reset_safe();
-
-    //Create a new one
-    create_flac();
-}
-
-bool fmice_codec_flac::write_safe(float* samples, int count) {
+    //Enter loop to read buffer and split into blocks
     int readOffset = 0;
     while (count > 0) {
         //Determine how many samples PER CHANNEL we can write to the buffer (avail in buffer - avail in input)
@@ -81,10 +68,22 @@ bool fmice_codec_flac::write_safe(float* samples, int count) {
         count -= readable;
 
         //If buffer is full, process
-        if (input_buffer_use == input_buffer_samples && !submit_buffer())
-            return false;
+        if (input_buffer_use == input_buffer_samples) {
+            if (!submit_buffer())
+                signal_error(); // Notify of error
+        }
     }
-    return true;
+}
+
+void fmice_codec_flac::reset() {
+    //Destroy stream encoder
+    if (flac != NULL) {
+        FLAC__stream_encoder_delete(flac);
+        flac = NULL;
+    }
+
+    //Create a new one
+    create_flac();
 }
 
 bool fmice_codec_flac::submit_buffer() {
@@ -124,6 +123,6 @@ FLAC__StreamEncoderWriteStatus fmice_codec_flac::flac_push_cb_static(const FLAC_
 }
 
 FLAC__StreamEncoderWriteStatus fmice_codec_flac::flac_push_cb(const FLAC__StreamEncoder* encoder, const FLAC__byte buffer[], size_t bytes, uint32_t samples, uint32_t current_frame) {
-    push_out(buffer, bytes);
+    push_out(buffer, (int)bytes);
     return FLAC__STREAM_ENCODER_WRITE_STATUS_OK;
 }
